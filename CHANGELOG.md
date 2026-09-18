@@ -6,7 +6,10 @@
   quoted strings across events. The parser now accepts numeric strings and
   RFC3339 strings, degrades unparsable values to nil, and skips malformed
   array elements instead of failing the whole poll. Adds
-  `TestSleepEventsTolerateStringTimestamps`. Config version 1.1.1.
+  `TestSleepEventsTolerateStringTimestamps`. Config version 1.1.2.
+- `/events/last` empty-object responses (HTTP 200 `{}`) are treated as
+  "no last event" instead of transient decode failures. Adds regression
+  coverage for the live Zara response.
 - Sleep expansion: latest-report sensors (`longest_sleep`, `sleep_onset`,
   `total_present_time`, `time_in_bed`, `parent_interventions`,
   `soothing_events`, `times_out_of_crib`, `sleep_sessions`, `sleep_score`,
@@ -20,7 +23,7 @@
   aggregate); media URLs, viewer metadata, and identifiers are never published.
   See `examples/home-assistant-sleep-dashboard.yaml` and
   `examples/home-assistant-sleep-recorder.yaml`.
-- Config version 1.1.1.
+- Config version 1.1.2.
 
 ## Unreleased (merged)
 
