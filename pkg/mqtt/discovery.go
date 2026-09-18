@@ -30,45 +30,74 @@ type haAvailability struct {
 }
 
 type haEntity struct {
-	Name              string           `json:"name"`
-	UniqueID          string           `json:"unique_id"`
-	StateTopic        string           `json:"state_topic"`
-	CommandTopic      string           `json:"command_topic,omitempty"`
-	DeviceClass       string           `json:"device_class,omitempty"`
-	StateClass        string           `json:"state_class,omitempty"`
-	UnitOfMeasurement string           `json:"unit_of_measurement,omitempty"`
-	Icon              string           `json:"icon,omitempty"`
-	PayloadOn         string           `json:"payload_on,omitempty"`
-	PayloadOff        string           `json:"payload_off,omitempty"`
-	StateOn           string           `json:"state_on,omitempty"`
-	StateOff          string           `json:"state_off,omitempty"`
-	Availability      []haAvailability `json:"availability,omitempty"`
-	Device            haDevice         `json:"device"`
+	Name                string           `json:"name"`
+	UniqueID            string           `json:"unique_id"`
+	StateTopic          string           `json:"state_topic"`
+	CommandTopic        string           `json:"command_topic,omitempty"`
+	DeviceClass         string           `json:"device_class,omitempty"`
+	StateClass          string           `json:"state_class,omitempty"`
+	UnitOfMeasurement   string           `json:"unit_of_measurement,omitempty"`
+	Icon                string           `json:"icon,omitempty"`
+	PayloadOn           string           `json:"payload_on,omitempty"`
+	PayloadOff          string           `json:"payload_off,omitempty"`
+	StateOn             string           `json:"state_on,omitempty"`
+	StateOff            string           `json:"state_off,omitempty"`
+	Availability        []haAvailability `json:"availability,omitempty"`
+	AvailabilityMode    string           `json:"availability_mode,omitempty"`
+	JSONAttributesTopic string           `json:"json_attributes_topic,omitempty"`
+	Device              haDevice         `json:"device"`
 }
 
 type entitySpec struct {
-	component string // "sensor" | "binary_sensor" | "switch"
-	object    string // object_id suffix
-	friendly  string
-	topic     string // state topic key (under nanit/babies/<uid>/)
-	cmd       string // command topic key, for switches
-	class     string
-	stateCls  string
-	unit      string
-	icon      string
+	component         string // "sensor" | "binary_sensor" | "switch"
+	object            string // object_id suffix
+	friendly          string
+	topic             string // state topic key (under nanit/babies/<uid>/)
+	cmd               string // command topic key, for switches
+	class             string
+	stateCls          string
+	unit              string
+	icon              string
+	sleepAvailability string
+	attributes        string
 }
 
 var entitySpecs = []entitySpec{
-	{"sensor", "temperature", "Temperature", "temperature", "", "temperature", "measurement", "°C", ""},
-	{"sensor", "humidity", "Humidity", "humidity", "", "humidity", "measurement", "%", ""},
-	{"sensor", "motion", "Last motion", "motion", "", "timestamp", "", "", "mdi:motion-sensor"},
-	{"sensor", "sound", "Last sound", "sound", "", "timestamp", "", "", "mdi:ear-hearing"},
-	{"binary_sensor", "motion_active", "Motion", "motion_active", "", "motion", "", "", ""},
-	{"binary_sensor", "sound_active", "Sound", "sound_active", "", "sound", "", "", ""},
-	{"binary_sensor", "night", "Night mode", "is_night", "", "", "", "", "mdi:weather-night"},
-	{"binary_sensor", "stream", "Stream", "is_stream_alive", "", "connectivity", "", "", ""},
-	{"switch", "night_light", "Night light", "night_light", "night_light/switch", "", "", "", "mdi:lightbulb-night"},
-	{"switch", "standby", "Standby", "standby", "standby/switch", "", "", "", "mdi:power-standby"},
+	{component: "sensor", object: "temperature", friendly: "Temperature", topic: "temperature", class: "temperature", stateCls: "measurement", unit: "°C"},
+	{component: "sensor", object: "humidity", friendly: "Humidity", topic: "humidity", class: "humidity", stateCls: "measurement", unit: "%"},
+	{component: "sensor", object: "motion", friendly: "Last motion", topic: "motion", class: "timestamp", icon: "mdi:motion-sensor"},
+	{component: "sensor", object: "sound", friendly: "Last sound", topic: "sound", class: "timestamp", icon: "mdi:ear-hearing"},
+	{component: "binary_sensor", object: "motion_active", friendly: "Motion", topic: "motion_active", class: "motion"},
+	{component: "binary_sensor", object: "sound_active", friendly: "Sound", topic: "sound_active", class: "sound"},
+	{component: "binary_sensor", object: "night", friendly: "Night mode", topic: "is_night", icon: "mdi:weather-night"},
+	{component: "binary_sensor", object: "stream", friendly: "Stream", topic: "is_stream_alive", class: "connectivity"},
+	{component: "switch", object: "night_light", friendly: "Night light", topic: "night_light", cmd: "night_light/switch", icon: "mdi:lightbulb-night"},
+	{component: "switch", object: "standby", friendly: "Standby", topic: "standby", cmd: "standby/switch", icon: "mdi:power-standby"},
+	{component: "sensor", object: "times_woke_up", friendly: "Times woke up", topic: "times_woke_up", icon: "mdi:sleep-off", sleepAvailability: "times_woke_up", attributes: "sleep_stats_attributes"},
+	{component: "sensor", object: "sleep_interventions", friendly: "Sleep interventions", topic: "sleep_interventions", icon: "mdi:human-greeting-proximity", sleepAvailability: "sleep_interventions", attributes: "sleep_stats_attributes"},
+	{component: "sensor", object: "awake_time_today", friendly: "Awake time today", topic: "awake_time_today", unit: "min", icon: "mdi:clock-time-four-outline", sleepAvailability: "awake_time_today", attributes: "sleep_stats_attributes"},
+	{component: "sensor", object: "sleep_time_today", friendly: "Sleep time today", topic: "sleep_time_today", unit: "min", icon: "mdi:clock-time-four", sleepAvailability: "sleep_time_today", attributes: "sleep_stats_attributes"},
+	{component: "sensor", object: "longest_sleep", friendly: "Longest sleep", topic: "longest_sleep", unit: "s", icon: "mdi:timer", sleepAvailability: "longest_sleep", attributes: "sleep_stats_attributes"},
+	{component: "sensor", object: "sleep_onset", friendly: "Sleep onset", topic: "sleep_onset", unit: "s", icon: "mdi:timer-sand", sleepAvailability: "sleep_onset", attributes: "sleep_stats_attributes"},
+	{component: "sensor", object: "total_present_time", friendly: "Total present time", topic: "total_present_time", unit: "s", icon: "mdi:bed-clock", sleepAvailability: "total_present_time", attributes: "sleep_stats_attributes"},
+	{component: "sensor", object: "time_in_bed", friendly: "Time in bed", topic: "time_in_bed", unit: "s", icon: "mdi:bed", sleepAvailability: "time_in_bed", attributes: "sleep_stats_attributes"},
+	{component: "sensor", object: "parent_interventions", friendly: "Parent interventions", topic: "parent_interventions", icon: "mdi:human-greeting-proximity", sleepAvailability: "parent_interventions", attributes: "sleep_stats_attributes"},
+	{component: "sensor", object: "soothing_events", friendly: "Soothing events", topic: "soothing_events", icon: "mdi:hand-heart", sleepAvailability: "soothing_events", attributes: "sleep_stats_attributes"},
+	{component: "sensor", object: "times_out_of_crib", friendly: "Times out of crib", topic: "times_out_of_crib", icon: "mdi:bed-empty", sleepAvailability: "times_out_of_crib", attributes: "sleep_stats_attributes"},
+	{component: "sensor", object: "sleep_sessions", friendly: "Sleep sessions", topic: "sleep_sessions", icon: "mdi:counter", sleepAvailability: "sleep_sessions", attributes: "sleep_stats_attributes"},
+	{component: "sensor", object: "sleep_score", friendly: "Sleep score", topic: "sleep_score", icon: "mdi:gauge", sleepAvailability: "sleep_score", attributes: "sleep_stats_attributes"},
+	{component: "sensor", object: "sleep_efficiency", friendly: "Sleep efficiency", topic: "sleep_efficiency", unit: "%", icon: "mdi:percent", sleepAvailability: "sleep_efficiency", attributes: "sleep_stats_attributes"},
+	{component: "sensor", object: "bed_start_time", friendly: "Bed start time", topic: "bed_start_time", class: "timestamp", sleepAvailability: "bed_start_time", attributes: "sleep_stats_attributes"},
+	{component: "sensor", object: "sleep_start_time", friendly: "Sleep start time", topic: "sleep_start_time", class: "timestamp", sleepAvailability: "sleep_start_time", attributes: "sleep_stats_attributes"},
+	{component: "sensor", object: "sleep_end_time", friendly: "Sleep end time", topic: "sleep_end_time", class: "timestamp", sleepAvailability: "sleep_end_time", attributes: "sleep_stats_attributes"},
+	{component: "sensor", object: "last_wake_up", friendly: "Last wake up", topic: "last_wake_up", class: "timestamp", sleepAvailability: "last_wake_up", attributes: "sleep_stats_attributes"},
+	{component: "sensor", object: "sleep_report_status", friendly: "Sleep report status", topic: "sleep_report_status", icon: "mdi:file-chart", sleepAvailability: "sleep_report_status", attributes: "sleep_stats_attributes"},
+	{component: "sensor", object: "sleep_timeline", friendly: "Sleep timeline", topic: "sleep_timeline", icon: "mdi:timeline-clock", sleepAvailability: "sleep_timeline", attributes: "sleep_timeline_attributes"},
+	{component: "sensor", object: "last_fell_asleep", friendly: "Last fell asleep", topic: "last_fell_asleep", class: "timestamp", sleepAvailability: "last_fell_asleep", attributes: "sleep_event_attributes"},
+	{component: "sensor", object: "last_parent_visit", friendly: "Last parent visit", topic: "last_parent_visit", class: "timestamp", sleepAvailability: "last_parent_visit", attributes: "sleep_event_attributes"},
+	{component: "sensor", object: "last_sleep_event", friendly: "Last sleep event", topic: "last_sleep_event", icon: "mdi:calendar-clock", sleepAvailability: "last_sleep_event", attributes: "sleep_event_attributes"},
+	{component: "binary_sensor", object: "is_asleep", friendly: "Asleep", topic: "is_asleep", icon: "mdi:sleep", sleepAvailability: "is_asleep", attributes: "sleep_state_attributes"},
+	{component: "binary_sensor", object: "in_bed", friendly: "In bed", topic: "in_bed", icon: "mdi:bed", sleepAvailability: "in_bed", attributes: "sleep_state_attributes"},
 }
 
 // streamURLForBaby returns the advertised rtmp:// URL for a baby, or "" when
@@ -154,15 +183,21 @@ func (conn *Connection) publishDiscovery(babyUID, babyName string) int {
 
 	for _, s := range entitySpecs {
 		e := haEntity{
-			Name:              s.friendly,
-			UniqueID:          fmt.Sprintf("nanit_%v_%v", babyUID, s.object),
-			StateTopic:        fmt.Sprintf("%v/%v", base, s.topic),
-			DeviceClass:       s.class,
-			StateClass:        s.stateCls,
-			UnitOfMeasurement: s.unit,
-			Icon:              s.icon,
-			Availability:      avail,
-			Device:            dev,
+			Name:                s.friendly,
+			UniqueID:            fmt.Sprintf("nanit_%v_%v", babyUID, s.object),
+			StateTopic:          fmt.Sprintf("%v/%v", base, s.topic),
+			DeviceClass:         s.class,
+			StateClass:          s.stateCls,
+			UnitOfMeasurement:   s.unit,
+			Icon:                s.icon,
+			Availability:        avail,
+			JSONAttributesTopic: "",
+			Device:              dev,
+		}
+		if s.sleepAvailability != "" {
+			e.Availability = append(e.Availability, haAvailability{Topic: fmt.Sprintf("%v/%v/availability", base, s.sleepAvailability), PayloadAvailable: "online", PayloadNotAvailable: "offline"})
+			e.AvailabilityMode = "all"
+			e.JSONAttributesTopic = fmt.Sprintf("%v/%v", base, s.attributes)
 		}
 		if s.component == "binary_sensor" || s.component == "switch" {
 			e.PayloadOn = "true"

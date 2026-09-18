@@ -1,11 +1,11 @@
 name: Nanit Bridge
-version: "1.0.0"
+version: "1.1.0"
 slug: nanit
 description: >-
   Bridges a Nanit baby monitor to Home Assistant: local RTMP camera feed plus
-  MQTT sensors (temperature, humidity, motion, sound, night mode) and controls
-  (night light, standby) with auto-discovery.
-url: https://github.com/WColan/home_assistant_nanit
+  MQTT sensors (temperature, humidity, motion, sound, night mode, sleep reports
+  and timeline) and controls (night light, standby) with auto-discovery.
+url: https://github.com/nrlcode/home_assistant_nanit
 arch:
   - aarch64
   - amd64

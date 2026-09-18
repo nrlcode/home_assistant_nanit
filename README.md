@@ -82,6 +82,40 @@ invalidates the refresh token.
 > The refresh token grants full access to your Nanit account. Treat it like a
 > password. Never commit `session.json`, tokens, or credentials.
 
+## Sleep reports and timeline
+
+MQTT discovery publishes latest-report metrics separately from the fresh live
+`is_asleep` and `in_bed` sensors. Completed reports remain historical snapshots
+and never imply current state. Sleep-event notifications are best-effort,
+non-retained, startup/backfill suppressed, and may be lost during an MQTT
+disconnect; retained report, timestamp, status, and timeline snapshots are
+republished on the next normal poll.
+
+New entities include `longest_sleep`, `sleep_onset`, `total_present_time`,
+`time_in_bed`, `parent_interventions`, `soothing_events`, `times_out_of_crib`,
+`sleep_sessions`, `sleep_score` (0–100), `sleep_efficiency`, `bed_start_time`,
+`sleep_start_time`, `sleep_end_time`, `last_wake_up`, `sleep_report_status`,
+`sleep_timeline`, `last_fell_asleep`, and `last_parent_visit`, plus live
+`is_asleep` / `in_bed`. Full topic table: see [`docs/sensors.md`](docs/sensors.md).
+
+The bridge stores only allowlisted report scalars, normalized state intervals,
+sanitized event classes, and hashed dedupe keys in a private `sleep-history`
+directory beside `session.json`. Files are mode 0600 in a mode 0700 directory,
+retained for 30 days, and bounded to 16 MiB aggregate. It never stores media
+URLs, viewer metadata, raw reports, raw corrections, or identity fields. Remove
+this owned directory only after making any desired private backup; do not remove
+`session.json`.
+
+Use `examples/home-assistant-sleep-dashboard.yaml` as a core-card dashboard
+starting point and `examples/home-assistant-sleep-recorder.yaml` to exclude the
+bounded timeline attributes from Recorder. Replace the placeholder discovery
+suffix first. Times are UTC on MQTT and localized by Home Assistant.
+
+Rollback to an older image leaves the private history directory ignored. To clean
+retained MQTT data for this feature only, remove the discovery/state/availability
+topics for the entities above plus `sleep_event` (non-retained). Preserve the
+pre-existing sleep and stream topics.
+
 ## Notes
 
 - The camera has one local RTMP slot. If the Nanit app is streaming locally at

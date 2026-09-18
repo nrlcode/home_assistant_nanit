@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -435,6 +436,7 @@ func (app *App) startNotificationPolling(ctx utils.GracefulContext) {
 		PollerConfig: pollerConfig,
 		TopicPrefix:  app.MQTTConnection.GetTopicPrefix(),
 		Babies:       app.SessionStore.GetBabies(),
+		HistoryDir:   filepath.Join(filepath.Dir(app.Opts.SessionFile), "sleep-history"),
 	}
 
 	// Synchronous readiness: the adapter must never capture nil even if Run

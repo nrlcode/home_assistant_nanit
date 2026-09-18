@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+- Sleep expansion: latest-report sensors (`longest_sleep`, `sleep_onset`,
+  `total_present_time`, `time_in_bed`, `parent_interventions`,
+  `soothing_events`, `times_out_of_crib`, `sleep_sessions`, `sleep_score`,
+  `sleep_efficiency`, `bed_start_time`, `sleep_start_time`, `sleep_end_time`,
+  `last_wake_up`, `sleep_report_status`, `sleep_timeline`, `last_fell_asleep`,
+  `last_parent_visit`) plus live `is_asleep` / `in_bed` binary sensors.
+  Reports are historical snapshots; live state requires fresh ongoing data.
+  Startup/backfill/restart duplicates are suppressed; `sleep_event` is
+  non-retained best-effort while report/timestamp/timeline snapshots are
+  retained and republished. Bounded private `sleep-history` (30 days, 16 MiB
+  aggregate); media URLs, viewer metadata, and identifiers are never published.
+  See `examples/home-assistant-sleep-dashboard.yaml` and
+  `examples/home-assistant-sleep-recorder.yaml`.
+- Config version 1.1.0.
+
 ## Unreleased (merged)
 
 - Local↔cloud stream failover with persistent broadcaster; unstable-connection

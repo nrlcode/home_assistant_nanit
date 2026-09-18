@@ -171,7 +171,7 @@ func TestDiscoveryContract(t *testing.T) {
 	if len(pubs) == 0 {
 		t.Fatal("no discovery publications")
 	}
-	// Expect 10 roster + 1 stream_url discovery + 1 stream_url value = 12.
+	// Expect the expanded 35-entry roster plus stream_url discovery.
 	discoveryCount := 0
 	for _, p := range pubs {
 		if strings.HasSuffix(p.topic, "/config") {
@@ -181,8 +181,8 @@ func TestDiscoveryContract(t *testing.T) {
 			}
 		}
 	}
-	if discoveryCount != 11 {
-		t.Errorf("discovery config count = %d, want 11 (10 roster + stream_url)", discoveryCount)
+	if discoveryCount != 36 {
+		t.Errorf("discovery config count = %d, want 36 (35 roster + stream_url)", discoveryCount)
 	}
 	// Spot-check roster topics and IDs.
 	for _, want := range []struct{ component, object string }{

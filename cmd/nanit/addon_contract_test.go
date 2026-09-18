@@ -103,6 +103,8 @@ func TestAddonContract(t *testing.T) {
 			"Dockerfile",
 			"rootfs/run.sh",
 			"docs/frigate-example.yaml",
+			"examples/home-assistant-sleep-dashboard.yaml",
+			"examples/home-assistant-sleep-recorder.yaml",
 		} {
 			if _, err := os.Stat(filepath.Join(root, rel)); err != nil {
 				t.Errorf("missing %q: %v", rel, err)
@@ -117,15 +119,18 @@ func TestAddonContract(t *testing.T) {
 				t.Errorf("excluded file %q must not exist in module", rel)
 			}
 		}
-		// No sleep subsystem in module.
+		// Sleep polling is integrated into the existing notification lifecycle; no independent tracker is allowed.
 		for _, rel := range []string{
 			"pkg/notification/sleep_event.go",
 			"pkg/notification/stats.go",
-			"pkg/notification/sleep_state_tracker.go",
+			"pkg/notification/sleep_manager.go",
 		} {
-			if _, err := os.Stat(filepath.Join(root, rel)); err == nil {
-				t.Errorf("sleep subsystem %q must be excluded", rel)
+			if _, err := os.Stat(filepath.Join(root, rel)); err != nil {
+				t.Errorf("sleep subsystem %q missing: %v", rel, err)
 			}
+		}
+		if _, err := os.Stat(filepath.Join(root, "pkg/notification/sleep_state_tracker.go")); err == nil {
+			t.Error("independent sleep state tracker must remain excluded")
 		}
 	})
 

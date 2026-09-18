@@ -1,0 +1,40 @@
+# Replace `baby_uid` in the entity IDs below with the suffix created by MQTT discovery.
+# Report sensors describe Nanit's latest report; binary sensors describe only fresh live state.
+title: Nanit sleep
+views:
+  - title: Sleep
+    cards:
+      - type: entities
+        title: Latest report
+        entities:
+          - sensor.nanit_baby_uid_sleep_report_status
+          - sensor.nanit_baby_uid_sleep_score
+          - sensor.nanit_baby_uid_sleep_efficiency
+          - sensor.nanit_baby_uid_sleep_time_today
+          - sensor.nanit_baby_uid_last_fell_asleep
+          - sensor.nanit_baby_uid_last_wake_up
+          - sensor.nanit_baby_uid_last_parent_visit
+      - type: markdown
+        title: Timeline (cached report data may be stale)
+        content: >-
+          {% set timeline = state_attr('sensor.nanit_baby_uid_sleep_timeline', 'rows') %}
+          {% if states('sensor.nanit_baby_uid_sleep_timeline') in ['unknown','unavailable',''] or not timeline %}
+          Timeline unavailable.
+          {% else %}
+          | Type | State / event | Local time |
+          |---|---|---|
+          {% for row in timeline %}
+          | {{ row.type }} | {{ row.state | default(row.event_type, true) }} | {{ as_local(as_datetime(row.start | default(row.occurred_at, true))) }} |
+          {% endfor %}
+          {% if state_attr('sensor.nanit_baby_uid_sleep_timeline','truncated') %}
+          Truncated: {{ state_attr('sensor.nanit_baby_uid_sleep_timeline','omitted_rows') }} rows omitted.
+          {% endif %}
+          {% endif %}
+      - type: history-graph
+        title: Fresh live state
+        hours_to_show: 12
+        entities:
+          - binary_sensor.nanit_baby_uid_is_asleep
+          - binary_sensor.nanit_baby_uid_in_bed
+# Source timestamps are UTC; as_datetime/as_local renders the HA-configured timezone,
+# including repeated or skipped DST hours. No notification or automation is installed.

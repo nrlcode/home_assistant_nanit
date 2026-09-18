@@ -11,18 +11,26 @@ import (
 
 // ManagerConfig configures the NotificationManager
 type ManagerConfig struct {
-	PollerConfig PollerConfig
-	TopicPrefix  string
-	Babies       []baby.Baby
+	PollerConfig         PollerConfig
+	TopicPrefix          string
+	Babies               []baby.Baby
+	SleepEventInterval   time.Duration
+	SleepStatsInterval   time.Duration
+	SleepEventStaleAfter time.Duration
+	SleepStatsStaleAfter time.Duration
+	HistoryDir           string
 }
 
 // Manager coordinates polling and publishing of notification events
 type Manager struct {
-	config    ManagerConfig
-	poller    *Poller
-	publisher *Publisher
-	fetcher   MessageFetcher
-	OnEvent   func(Event)
+	config       ManagerConfig
+	poller       *Poller
+	publisher    *Publisher
+	fetcher      MessageFetcher
+	sleepFetcher SleepFetcher
+	sleepState   map[string]*sleepBabyState
+	sleepHistory *sleepHistory
+	OnEvent      func(Event)
 
 	mu          sync.Mutex
 	babyBackoff map[string]time.Duration
@@ -30,13 +38,29 @@ type Manager struct {
 
 // NewManager creates a new NotificationManager
 func NewManager(config ManagerConfig, fetcher MessageFetcher, mqttClient MQTTClient) *Manager {
-	return &Manager{
-		config:      config,
-		poller:      NewPoller(config.PollerConfig, fetcher),
-		publisher:   NewPublisher(mqttClient, config.TopicPrefix),
-		fetcher:     fetcher,
-		babyBackoff: make(map[string]time.Duration),
+	if config.SleepEventInterval <= 0 {
+		config.SleepEventInterval = defaultSleepEventInterval
 	}
+	if config.SleepStatsInterval <= 0 {
+		config.SleepStatsInterval = defaultSleepStatsInterval
+	}
+	if config.SleepEventStaleAfter <= 0 {
+		config.SleepEventStaleAfter = defaultSleepEventStale
+	}
+	if config.SleepStatsStaleAfter <= 0 {
+		config.SleepStatsStaleAfter = defaultSleepStatsStale
+	}
+	manager := &Manager{
+		config:       config,
+		poller:       NewPoller(config.PollerConfig, fetcher),
+		publisher:    NewPublisher(mqttClient, config.TopicPrefix),
+		fetcher:      fetcher,
+		babyBackoff:  make(map[string]time.Duration),
+		sleepState:   make(map[string]*sleepBabyState),
+		sleepHistory: newSleepHistory(config.HistoryDir),
+	}
+	manager.sleepFetcher, _ = fetcher.(SleepFetcher)
+	return manager
 }
 
 // Run starts the notification polling loop for all babies
@@ -66,6 +90,7 @@ func (m *Manager) Run(ctx context.Context) error {
 					return ctx.Err()
 				}
 			}
+			m.pollSleepDue(ctx, babyInfo.UID, time.Now())
 		}
 
 		interval := m.poller.NextInterval()

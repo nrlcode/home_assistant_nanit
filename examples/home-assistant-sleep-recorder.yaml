@@ -1,0 +1,8 @@
+# Merge under Home Assistant's recorder configuration.
+# The timeline has bounded but frequently changing attributes and is excluded by default.
+recorder:
+  exclude:
+    entities:
+      - sensor.nanit_baby_uid_sleep_timeline
+# Replace baby_uid with the discovery suffix. Other report/live sensors may be recorded
+# according to the retention configured by the Home Assistant operator.

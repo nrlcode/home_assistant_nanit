@@ -46,6 +46,68 @@ type messagesResponsePayload struct {
 	Messages []message.Message `json:"messages"`
 }
 
+type sleepEventsResponsePayload struct {
+	Events []SleepEvent `json:"events"`
+}
+
+type lastSleepEventResponsePayload struct {
+	Event *SleepEvent `json:"event"`
+}
+
+func (p *lastSleepEventResponsePayload) UnmarshalJSON(data []byte) error {
+	data = bytes.TrimSpace(data)
+	if bytes.Equal(data, []byte("null")) {
+		p.Event = nil
+		return nil
+	}
+	if len(data) == 0 || data[0] != '{' {
+		return errors.New("last sleep event must be an object or null")
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	wrapped, hasWrapped := fields["event"]
+	_, hasKey := fields["key"]
+	_, hasTime := fields["time"]
+	if hasWrapped && (hasKey || hasTime) {
+		return errors.New("ambiguous last sleep event payload")
+	}
+	if hasWrapped {
+		if bytes.Equal(bytes.TrimSpace(wrapped), []byte("null")) {
+			p.Event = nil
+			return nil
+		}
+		var event SleepEvent
+		if err := json.Unmarshal(wrapped, &event); err != nil {
+			return err
+		}
+		if event.Key == "" {
+			return errors.New("last sleep event key is required")
+		}
+		if _, ok := event.Time(); !ok {
+			return errors.New("last sleep event time is invalid")
+		}
+		p.Event = &event
+		return nil
+	}
+	if !hasKey || !hasTime {
+		return errors.New("last sleep event key and time are required")
+	}
+	var event SleepEvent
+	if err := json.Unmarshal(data, &event); err != nil {
+		return err
+	}
+	if event.Key == "" {
+		return errors.New("last sleep event key is required")
+	}
+	if _, ok := event.Time(); !ok {
+		return errors.New("last sleep event time is invalid")
+	}
+	p.Event = &event
+	return nil
+}
+
 // ------------------------------------------
 
 // NanitClient - client context
@@ -546,6 +608,48 @@ func (c *NanitClient) EnsureBabies() ([]baby.Baby, error) {
 		return c.FetchBabies()
 	}
 	return c.SessionStore.GetBabies(), nil
+}
+
+func (c *NanitClient) TryFetchSleepStatsCtx(ctx context.Context, babyUID string) (SleepStatsResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("https://api.nanit.com/babies/%s/stats/latest", babyUID), nil)
+	if err != nil {
+		return SleepStatsResponse{}, fmt.Errorf("unable to create request: %w", err)
+	}
+	var data SleepStatsResponse
+	if err := c.TryFetchAuthorizedCtx(ctx, req, &data); err != nil {
+		return SleepStatsResponse{}, err
+	}
+	return data, nil
+}
+
+func (c *NanitClient) TryFetchSleepEventsCtx(ctx context.Context, babyUID string, limit int) ([]SleepEvent, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("https://api.nanit.com/babies/%s/events?limit=%d", babyUID, limit), nil)
+	if err != nil {
+		return nil, fmt.Errorf("unable to create request: %w", err)
+	}
+	var data sleepEventsResponsePayload
+	if err := c.TryFetchAuthorizedCtx(ctx, req, &data); err != nil {
+		return nil, err
+	}
+	return data.Events, nil
+}
+
+func (c *NanitClient) TryFetchLastSleepEventCtx(ctx context.Context, babyUID string) (*SleepEvent, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("https://api.nanit.com/babies/%s/events/last", babyUID), nil)
+	if err != nil {
+		return nil, fmt.Errorf("unable to create request: %w", err)
+	}
+	var data lastSleepEventResponsePayload
+	if err := c.TryFetchAuthorizedCtx(ctx, req, &data); err != nil {
+		return nil, err
+	}
+	return data.Event, nil
 }
 
 // FetchNewMessages - fetches the bounded recent message window, ignoring old
