@@ -45,6 +45,7 @@ type haEntity struct {
 	Availability        []haAvailability `json:"availability,omitempty"`
 	AvailabilityMode    string           `json:"availability_mode,omitempty"`
 	JSONAttributesTopic string           `json:"json_attributes_topic,omitempty"`
+	Options             []string         `json:"options,omitempty"`
 	Device              haDevice         `json:"device"`
 }
 
@@ -211,6 +212,9 @@ func (conn *Connection) publishDiscovery(babyUID, babyName string) int {
 		if s.component == "switch" {
 			e.StateOn = "true"
 			e.StateOff = "false"
+		}
+		if s.component == "select" {
+			e.Options = []string{"today"}
 		}
 		publishOne(s.component, s.object, e)
 	}

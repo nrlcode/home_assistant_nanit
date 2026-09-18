@@ -1,31 +1,44 @@
 # Sensors
 
-The bridge publishes camera and sleep updates to MQTT. See `NANIT_MQTT_*` in [`.env.sample`](../.env.sample).
+The bridge publishes camera, stream, sleep-state, latest-report, event, and historical timeline entities through MQTT discovery. Entity IDs are stable as `nanit_<baby_uid>_<object>` and are grouped on the baby device.
 
-Camera topics include:
-
-- `nanit/babies/{baby_uid}/temperature` — degrees Celsius
-- `nanit/babies/{baby_uid}/humidity` — percent
-- `nanit/babies/{baby_uid}/is_night` — night mode
-
-Sleep discovery adds five sensors and two binary sensors with stable IDs `nanit_{baby_uid}_{object}`:
+## Camera and stream entities
 
 | Object | Meaning | Unit |
 |---|---|---|
-| `times_woke_up` | Wake-up count for the API's latest period | count |
-| `sleep_interventions` | Intervention count for the latest period | count |
-| `awake_time_today` | Total awake duration from the latest payload | min |
-| `sleep_time_today` | Total sleep duration from the latest payload | min |
-| `last_sleep_event` | Latest sleep event key | — |
-| `is_asleep` | Current projected asleep state | boolean |
-| `in_bed` | Current projected crib/bed state | boolean |
+| `temperature` | Camera temperature | °C |
+| `humidity` | Camera humidity | % |
+| `motion` / `sound` | Last detected event timestamp | timestamp |
+| `motion_active` / `sound_active` | Current activity | boolean |
+| `night` | Night mode | boolean |
+| `stream` | Measured stream liveness | boolean |
+| `stream_url` | Advertised RTMP URL, only when explicitly configured | — |
+| `night_light` / `standby` | Writable camera controls | boolean |
 
-The API names the duration fields “today”, but the bridge does not infer a calendar or timezone beyond the returned latest-period payload. Seconds are truncated to whole minutes. Present zero and false values are published; missing or null values are not replaced with zero or false.
+## Sleep entities
 
-Each sleep entity requires both bridge availability and its sleep-specific availability topic. Statistics become stale after 15 minutes and event/state data after 90 seconds. Transport errors retain the previous scalar while availability eventually becomes offline; successful missing or invalid responses make the affected family unavailable immediately. State reconciliation uses verified event/state Unix timestamps and does not treat fetch time as a transition time.
+The latest-report sensors expose only fields with verified units and semantics. Duration values are seconds unless marked otherwise; `awake_time_today` and `sleep_time_today` are whole minutes. Missing values remain unavailable rather than being changed to zero or false.
 
-Only the four statistics above are exposed. Other `/stats/latest` fields remain diagnostic-only because their units or semantics are not verified. Historical state arrays, arbitrary event fields, media/clip URLs, crying detection, daily summary, and account-access assumptions are not exposed. `/summary` remains excluded because its contract is unresolved.
+| Object | Meaning |
+|---|---|
+| `times_woke_up`, `sleep_interventions`, `parent_interventions`, `soothing_events`, `times_out_of_crib`, `sleep_sessions` | Report counts |
+| `awake_time_today`, `sleep_time_today` | Latest report durations, minutes |
+| `longest_sleep`, `sleep_onset`, `total_present_time`, `time_in_bed` | Latest report durations, seconds |
+| `sleep_score`, `sleep_efficiency` | Report score and percentage |
+| `bed_start_time`, `sleep_start_time`, `sleep_end_time`, `last_wake_up` | Report timestamps |
+| `sleep_report_status` | Report status |
+| `sleep_timeline` | Current retained timeline key with JSON attributes |
+| `last_fell_asleep`, `last_parent_visit`, `last_sleep_event` | Latest event information |
+| `is_asleep`, `in_bed` | Reconciled live binary state |
+| `sleep_timeline_history` | Date-addressed historical timeline key |
+| `sleep_timeline_history_date` | MQTT select for a UTC `YYYY-MM-DD` history date |
 
-Home Assistant discovery attaches bounded freshness/state/event attributes on dedicated JSON attribute topics. Raw API responses, credentials, camera IDs, baby IDs, and event history are never written as attributes or logs.
+The history-date select publishes its selected date retained on `nanit/babies/{baby_uid}/sleep_timeline_history_date`; invalid, future, missing, or pruned dates publish unavailable history state without changing the latest timeline. Its discovery options include `today` as the initial usable selection; valid dates received through the command topic are retained as state.
 
-See [Home Assistant setup](./home-assistant.md). For MQTT troubleshooting, use [MQTT Explorer](http://mqtt-explorer.com/).
+## Availability and privacy
+
+Bridge availability and the entity-specific sleep availability topic must both be online. Statistics become stale after 15 minutes; event and live-state data become stale after 90 seconds. Transport failures retain the previous scalar until availability becomes offline, while successful missing or invalid responses make the affected family unavailable immediately.
+
+Historical data is stored only in the private `sleep-history` directory. It is bounded to 30 days, 60 reports, 2,000 events per file, and an intentional approved 64 MiB aggregate cap (the larger cap allows the retained historical timeline to cover the supported 30-day window without premature eviction). Files contain sanitized states, metrics, timestamps, and hashed dedupe keys. Raw API responses, credentials, media/clip URLs, viewer metadata, camera IDs, baby IDs, and arbitrary event fields are never published as MQTT attributes or logs.
+
+See [Home Assistant setup](./home-assistant.md), [sleep dashboard example](../examples/home-assistant-sleep-dashboard.yaml), and [sleep recorder example](../examples/home-assistant-sleep-recorder.yaml).

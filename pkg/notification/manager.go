@@ -77,6 +77,7 @@ func (m *Manager) SetSleepTimelineDate(babyUID, date string) {
 	m.mu.Lock()
 	m.selectedDates[babyUID] = date
 	m.mu.Unlock()
+	_ = m.publisher.PublishSleepTimelineDate(babyUID, date)
 	if history, err := m.sleepHistory.load(m.historyScopeForBaby(babyUID), time.Now().UTC()); err == nil {
 		_ = m.publisher.PublishSleepTimelineForDate(babyUID, date, history)
 	} else {

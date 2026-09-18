@@ -97,7 +97,14 @@ func (p *lastSleepEventResponsePayload) UnmarshalJSON(data []byte) error {
 		p.Event = nil
 		return nil
 	}
-	if len(data) == 0 || data[0] != '{' {
+	if len(data) == 0 {
+		return errors.New("last sleep event must be an object or null")
+	}
+	if bytes.Equal(data, []byte("{}")) {
+		p.Event = nil
+		return nil
+	}
+	if data[0] != '{' {
 		return errors.New("last sleep event must be an object or null")
 	}
 	var fields map[string]json.RawMessage

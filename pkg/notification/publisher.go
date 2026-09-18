@@ -30,7 +30,10 @@ func NewPublisher(client MQTTClient, topicPrefix string) *Publisher {
 	}
 }
 
-// EventPayload is the JSON structure published to event topics
+func (p *Publisher) PublishSleepTimelineDate(babyUID, date string) error {
+	return p.client.Publish(fmt.Sprintf("%s/babies/%s/sleep_timeline_history_date", p.topicPrefix, babyUID), 0, true, date)
+}
+
 type EventPayload struct {
 	ID            int    `json:"id"`
 	Type          string `json:"type"`

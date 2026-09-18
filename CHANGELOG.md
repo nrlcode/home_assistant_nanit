@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- 1.1.3 remediation: restore empty `{}` last-event compatibility, complete the
+  historical sensor documentation, and make the Home Assistant history-date
+  select usable with discovery options and retained selected-date state.
+  Historical storage keeps the approved intentional 64 MiB aggregate cap so
+  the supported 30-day history is not evicted prematurely.
+
 - Fix sleep event decoding: Nanit encodes `updated_at`/`time` as numbers or
   quoted strings across events. The parser now accepts numeric strings and
   RFC3339 strings, degrades unparsable values to nil, and skips malformed
