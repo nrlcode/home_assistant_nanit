@@ -96,6 +96,21 @@ func TestSetSleepTimelineDateValidationAndIsolation(t *testing.T) {
 	}
 }
 
+func TestSetSleepTimelineDateRetainsSelectedDateState(t *testing.T) {
+	mqtt := &sleepMQTTRecorder{}
+	m := NewManager(ManagerConfig{TopicPrefix: "nanit"}, &sleepManagerFetcher{}, mqtt)
+	m.SetSleepTimelineDate("baby", "2024-01-02")
+	for _, attempt := range mqtt.attempts {
+		if attempt.topic == "nanit/babies/baby/sleep_timeline_history_date" {
+			if attempt.payload != "2024-01-02" || !attempt.retained {
+				t.Fatalf("publication=%+v", attempt)
+			}
+			return
+		}
+	}
+	t.Fatal("selected date state was not published")
+}
+
 func TestSleepManagerIsolatesBabiesAndStales(t *testing.T) {
 	valid := true
 	zero := 0

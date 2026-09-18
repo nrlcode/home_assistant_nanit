@@ -1,6 +1,9 @@
 package mqtt
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestSleepDiscoveryHasSevenStableIDsAndDualAvailability(t *testing.T) {
 	want := map[string]string{
@@ -87,4 +90,24 @@ func TestHistoricalTimelineDiscovery(t *testing.T) {
 			t.Errorf("selector missing command topic")
 		}
 	}
+}
+
+func TestSleepTimelineDateDiscoveryIncludesTodayOption(t *testing.T) {
+	conn, client, _ := newConnForTest(Opts{TopicPrefix: "nanit", DiscoveryEnabled: true})
+	conn.publishDiscovery("baby", "Baby")
+
+	publication := client.findTopic("/select/nanit_baby/sleep_timeline_history_date/config")
+	if publication == nil {
+		t.Fatal("history-date select discovery was not published")
+	}
+	var entity haEntity
+	if err := json.Unmarshal([]byte(publication.payload), &entity); err != nil {
+		t.Fatal(err)
+	}
+	for _, option := range entity.Options {
+		if option == "today" {
+			return
+		}
+	}
+	t.Fatalf("options=%q, want today", entity.Options)
 }

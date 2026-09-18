@@ -78,6 +78,20 @@ func TestPublishSleepTimelineForDatePropagatesFailure(t *testing.T) {
 	}
 }
 
+func TestPublishSleepTimelineDateRetainsSelectedDate(t *testing.T) {
+	client := &sleepMQTTRecorder{}
+	if err := NewPublisher(client, "nanit").PublishSleepTimelineDate("baby", "2024-01-02"); err != nil {
+		t.Fatal(err)
+	}
+	if len(client.attempts) != 1 {
+		t.Fatalf("attempts=%d, want 1", len(client.attempts))
+	}
+	attempt := client.attempts[0]
+	if attempt.topic != "nanit/babies/baby/sleep_timeline_history_date" || attempt.payload != "2024-01-02" || !attempt.retained {
+		t.Fatalf("publication=%+v", attempt)
+	}
+}
+
 // MockMQTTClient implements MQTTClient for testing
 type MockMQTTClient struct {
 	mu        sync.Mutex

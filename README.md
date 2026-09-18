@@ -104,7 +104,8 @@ New entities include `longest_sleep`, `sleep_onset`, `total_present_time`,
 The bridge stores only allowlisted report scalars, normalized state intervals,
 sanitized event classes, and hashed dedupe keys in a private `sleep-history`
 directory beside `session.json`. Files are mode 0600 in a mode 0700 directory,
-retained for 30 days, and bounded to 16 MiB aggregate. It never stores media
+retained for 30 days, and bounded to 64 MiB aggregate so the supported history
+window is not evicted prematurely. It never stores media
 URLs, viewer metadata, raw reports, raw corrections, or identity fields. Remove
 this owned directory only after making any desired private backup; do not remove
 `session.json`.

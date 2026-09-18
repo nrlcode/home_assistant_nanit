@@ -25,7 +25,7 @@
   Reports are historical snapshots; live state requires fresh ongoing data.
   Startup/backfill/restart duplicates are suppressed; `sleep_event` is
   non-retained best-effort while report/timestamp/timeline snapshots are
-  retained and republished. Bounded private `sleep-history` (30 days, 16 MiB
+  retained and republished. Bounded private `sleep-history` (30 days, 64 MiB
   aggregate); media URLs, viewer metadata, and identifiers are never published.
   See `examples/home-assistant-sleep-dashboard.yaml` and
   `examples/home-assistant-sleep-recorder.yaml`.
