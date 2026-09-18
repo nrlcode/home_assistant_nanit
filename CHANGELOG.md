@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Fix sleep event decoding: Nanit encodes `updated_at`/`time` as numbers or
+  quoted strings across events. The parser now accepts numeric strings and
+  RFC3339 strings, degrades unparsable values to nil, and skips malformed
+  array elements instead of failing the whole poll. Adds
+  `TestSleepEventsTolerateStringTimestamps`. Config version 1.1.1.
 - Sleep expansion: latest-report sensors (`longest_sleep`, `sleep_onset`,
   `total_present_time`, `time_in_bed`, `parent_interventions`,
   `soothing_events`, `times_out_of_crib`, `sleep_sessions`, `sleep_score`,
@@ -15,7 +20,7 @@
   aggregate); media URLs, viewer metadata, and identifiers are never published.
   See `examples/home-assistant-sleep-dashboard.yaml` and
   `examples/home-assistant-sleep-recorder.yaml`.
-- Config version 1.1.0.
+- Config version 1.1.1.
 
 ## Unreleased (merged)
 

@@ -165,3 +165,36 @@ func TestSleepReportFieldContract(t *testing.T) {
 		}
 	}
 }
+
+func TestSleepEventsTolerateStringTimestamps(t *testing.T) {
+	old := myClient
+	defer func() { myClient = old }()
+	// Live Nanit encodes updated_at/time as numbers or quoted strings.
+	body := `{"events":[{"key":"WOKE_UP","time":1789736173.5,"updated_at":"1789740925","internal_key":"VISIT_WOKE_UP"},{"key":"REMOVED","time":"1789738088.812","updated_at":"2026-09-18T13:28:08Z"},null,{"key":"BROKEN","time":false}]}`
+	myClient = &http.Client{Transport: sleepRoundTripper(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+	})}
+	c := &NanitClient{SessionStore: session.NewSessionStore()}
+	c.SessionStore.UpdateAuth("token", "")
+	events, err := c.TryFetchSleepEventsCtx(context.Background(), "baby", 200)
+	if err != nil {
+		t.Fatalf("string-timestamp events failed: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("got %d events, want 2 (null skipped, malformed skipped): %#v", len(events), events)
+	}
+	if events[0].UpdatedAt == nil || *events[0].UpdatedAt != 1789740925 {
+		t.Fatalf("numeric-string updated_at not parsed: %#v", events[0].UpdatedAt)
+	}
+	if tm, ok := events[1].Time(); !ok || tm.Year() != 2026 {
+		t.Fatalf("string time not parsed: %#v %v", events[1].TimeRaw, tm)
+	}
+	// Unparsable strings degrade to nil rather than failing the poll.
+	var e SleepEvent
+	if err := json.Unmarshal([]byte(`{"key":"X","time":1,"updated_at":"not-a-number-or-date"}`), &e); err != nil {
+		t.Fatalf("unparsable updated_at should not error: %v", err)
+	}
+	if e.UpdatedAt != nil {
+		t.Fatalf("expected nil updated_at, got %v", *e.UpdatedAt)
+	}
+}

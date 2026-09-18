@@ -1,8 +1,11 @@
 package client
 
 import (
+	"bytes"
 	"encoding/json"
 	"math"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -104,6 +107,189 @@ type SleepEvent struct {
 	Confidence  *float64 `json:"confidence"`
 	Source      *string  `json:"source"`
 	UpdatedAt   *float64 `json:"updated_at"`
+}
+
+// Nanit sometimes encodes unix timestamps as JSON numbers and sometimes as
+// quoted strings (numeric or RFC3339). parseUnixFloatPtr accepts a number, a
+// numeric string, an RFC3339 string, or null and normalizes to unix seconds.
+// Unparsable strings degrade to nil so one odd field cannot fail a whole poll.
+func parseUnixFloatPtr(raw json.RawMessage) (*float64, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil, nil
+	}
+	if len(trimmed) > 0 && trimmed[0] == '"' {
+		var s string
+		if err := json.Unmarshal(trimmed, &s); err != nil {
+			return nil, err
+		}
+		s = strings.TrimSpace(s)
+		if s == "" || strings.EqualFold(s, "null") {
+			return nil, nil
+		}
+		if f, err := strconv.ParseFloat(s, 64); err == nil {
+			v := f
+			return &v, nil
+		}
+		for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02T15:04:05.999999999Z07:00", "2006-01-02 15:04:05", "2006-01-02"} {
+			if t, err := time.Parse(layout, s); err == nil {
+				v := float64(t.UnixNano()) / float64(time.Second)
+				return &v, nil
+			}
+		}
+		return nil, nil
+	}
+	var n json.Number
+	if err := json.Unmarshal(trimmed, &n); err != nil {
+		return nil, err
+	}
+	f, err := n.Float64()
+	if err != nil {
+		return nil, err
+	}
+	v := f
+	return &v, nil
+}
+
+func stringPtr(raw json.RawMessage) (*string, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil, nil
+	}
+	if len(trimmed) > 0 && trimmed[0] == '"' {
+		var s string
+		if err := json.Unmarshal(trimmed, &s); err != nil {
+			return nil, err
+		}
+		return &s, nil
+	}
+	// Tolerate numbers/bools in nominally-string fields.
+	var v interface{}
+	if err := json.Unmarshal(trimmed, &v); err != nil {
+		return nil, err
+	}
+	switch t := v.(type) {
+	case string:
+		return &t, nil
+	case float64:
+		s := strconv.FormatFloat(t, 'f', -1, 64)
+		return &s, nil
+	case bool:
+		s := strconv.FormatBool(t)
+		return &s, nil
+	}
+	return nil, nil
+}
+
+func plainString(raw json.RawMessage) string {
+	s, err := stringPtr(raw)
+	if err != nil || s == nil {
+		return ""
+	}
+	return *s
+}
+
+func boolPtr(raw json.RawMessage) (*bool, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil, nil
+	}
+	var b bool
+	if err := json.Unmarshal(trimmed, &b); err == nil {
+		return &b, nil
+	}
+	var s string
+	if err := json.Unmarshal(trimmed, &s); err == nil {
+		switch strings.ToLower(strings.TrimSpace(s)) {
+		case "true", "1":
+			v := true
+			return &v, nil
+		case "false", "0", "":
+			v := false
+			return &v, nil
+		}
+		return nil, nil
+	}
+	var n json.Number
+	if err := json.Unmarshal(trimmed, &n); err == nil {
+		if f, err := n.Float64(); err == nil {
+			v := f != 0
+			return &v, nil
+		}
+	}
+	return nil, nil
+}
+
+// UnmarshalJSON keeps the *float64 API while tolerating Nanit's mixed
+// number/string timestamp encoding.
+func (e *SleepEvent) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		*e = SleepEvent{}
+		return nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(trimmed, &fields); err != nil {
+		return err
+	}
+	var err error
+	e.Key = plainString(fields["key"])
+	e.InternalKey = plainString(fields["internal_key"])
+	if e.Title, err = stringPtr(fields["title"]); err != nil {
+		return err
+	}
+	if e.TimeRaw, err = parseUnixFloatPtr(fields["time"]); err != nil {
+		return err
+	}
+	if e.BeginTS, err = parseUnixFloatPtr(fields["begin_ts"]); err != nil {
+		return err
+	}
+	if e.EndTS, err = parseUnixFloatPtr(fields["end_ts"]); err != nil {
+		return err
+	}
+	e.BabyUID = plainString(fields["baby_uid"])
+	e.CameraUID = plainString(fields["camera_uid"])
+	e.UID = plainString(fields["uid"])
+	if e.Confidence, err = parseUnixFloatPtr(fields["confidence"]); err != nil {
+		return err
+	}
+	if e.Source, err = stringPtr(fields["source"]); err != nil {
+		return err
+	}
+	if e.UpdatedAt, err = parseUnixFloatPtr(fields["updated_at"]); err != nil {
+		return err
+	}
+	return nil
+}
+
+// UnmarshalJSON applies the same timestamp tolerance to report state intervals.
+func (s *SleepState) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		*s = SleepState{}
+		return nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(trimmed, &fields); err != nil {
+		return err
+	}
+	var err error
+	s.Title = plainString(fields["title"])
+	if s.BeginTS, err = parseUnixFloatPtr(fields["begin_ts"]); err != nil {
+		return err
+	}
+	if s.EndTS, err = parseUnixFloatPtr(fields["end_ts"]); err != nil {
+		return err
+	}
+	s.UID = plainString(fields["uid"])
+	s.BabyUID = plainString(fields["baby_uid"])
+	if s.TimeRaw, err = parseUnixFloatPtr(fields["time"]); err != nil {
+		return err
+	}
+	if s.Obsolete, err = boolPtr(fields["obsolete"]); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (e SleepEvent) Time() (time.Time, bool) {

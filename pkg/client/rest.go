@@ -50,6 +50,43 @@ type sleepEventsResponsePayload struct {
 	Events []SleepEvent `json:"events"`
 }
 
+// UnmarshalJSON decodes the events array element-by-element so one malformed
+// event cannot fail the whole poll; bad elements are skipped.
+func (p *sleepEventsResponsePayload) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		p.Events = nil
+		return nil
+	}
+	var outer map[string]json.RawMessage
+	if err := json.Unmarshal(trimmed, &outer); err != nil {
+		return err
+	}
+	raw, ok := outer["events"]
+	if !ok || len(bytes.TrimSpace(raw)) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		p.Events = nil
+		return nil
+	}
+	var items []json.RawMessage
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return err
+	}
+	events := make([]SleepEvent, 0, len(items))
+	for _, item := range items {
+		if len(bytes.TrimSpace(item)) == 0 || bytes.Equal(bytes.TrimSpace(item), []byte("null")) {
+			continue
+		}
+		var e SleepEvent
+		if err := json.Unmarshal(item, &e); err != nil {
+			log.Debug().Err(err).Msg("Skipping malformed sleep event")
+			continue
+		}
+		events = append(events, e)
+	}
+	p.Events = events
+	return nil
+}
+
 type lastSleepEventResponsePayload struct {
 	Event *SleepEvent `json:"event"`
 }
