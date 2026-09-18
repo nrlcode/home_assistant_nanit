@@ -14,8 +14,36 @@ views:
           - sensor.nanit_baby_uid_last_fell_asleep
           - sensor.nanit_baby_uid_last_wake_up
           - sensor.nanit_baby_uid_last_parent_visit
+      - type: entities
+        title: Historical timeline date (UTC)
+        entities:
+          - entity: select.nanit_baby_uid_sleep_timeline_history_date
+            name: Date
+          - entity: sensor.nanit_baby_uid_sleep_timeline_history
+            name: Selected date status
       - type: markdown
-        title: Timeline (cached report data may be stale)
+        title: Historical timeline
+        content: >-
+          {% set timeline = state_attr('sensor.nanit_baby_uid_sleep_timeline_history', 'rows') %}
+          {% set selected_date = states('select.nanit_baby_uid_sleep_timeline_history_date') %}
+          **Selected date (UTC):** {{ selected_date }}
+
+          Only one history date can be selected at a time because Home Assistant MQTT select exposes a single selected option. Choose another date above to replace the current timeline.
+
+          {% if states('sensor.nanit_baby_uid_sleep_timeline_history') in ['unknown','unavailable',''] or not timeline %}
+          No retained timeline is available for this date.
+          {% else %}
+          | Type | State / event | Local time |
+          |---|---|---|
+          {% for row in timeline %}
+          | {{ row.type }} | {{ row.state | default(row.event_type, true) }} | {{ as_local(as_datetime(row.start | default(row.occurred_at, true))) }} |
+          {% endfor %}
+          {% if state_attr('sensor.nanit_baby_uid_sleep_timeline_history','truncated') %}
+          Truncated: {{ state_attr('sensor.nanit_baby_uid_sleep_timeline_history','omitted_rows') }} rows omitted.
+          {% endif %}
+          {% endif %}
+      - type: markdown
+        title: Current timeline (latest report)
         content: >-
           {% set timeline = state_attr('sensor.nanit_baby_uid_sleep_timeline', 'rows') %}
           {% if states('sensor.nanit_baby_uid_sleep_timeline') in ['unknown','unavailable',''] or not timeline %}

@@ -134,6 +134,24 @@ func TestAddonContract(t *testing.T) {
 		}
 	})
 
+	t.Run("sleep dashboard history timeline", func(t *testing.T) {
+		data, err := os.ReadFile(filepath.Join(root, "examples/home-assistant-sleep-dashboard.yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := string(data)
+		for _, want := range []string{
+			"select.nanit_baby_uid_sleep_timeline_history_date",
+			"sensor.nanit_baby_uid_sleep_timeline_history",
+			"title: Historical timeline",
+			"Only one history date can be selected at a time",
+		} {
+			if !strings.Contains(text, want) {
+				t.Errorf("dashboard missing %q", want)
+			}
+		}
+	})
+
 	t.Run("options schema parity", func(t *testing.T) {
 		var cfg struct {
 			Options map[string]interface{} `yaml:"options"`
