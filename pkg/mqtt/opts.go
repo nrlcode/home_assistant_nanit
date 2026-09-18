@@ -9,4 +9,11 @@ type Opts struct {
 	Password string
 
 	TopicPrefix string
+
+	// Home Assistant MQTT discovery
+	DiscoveryEnabled bool
+	DiscoveryPrefix  string // usually "homeassistant"
+
+	// RTMPAddr is the explicit advertised host:port for stream_url (empty = sensors-only)
+	RTMPAddr string
 }

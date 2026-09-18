@@ -7,10 +7,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/indiefan/home_assistant_nanit/pkg/utils"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/sacOO7/gowebsocket"
-	"github.com/indiefan/home_assistant_nanit/pkg/utils"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -48,7 +48,14 @@ func (conn *WebsocketConnection) RegisterMessageHandler(handler WebsocketMessage
 
 // SendMessage - low-level helper for sending raw message
 // Note: Use SendRequest() for requests
-func (conn *WebsocketConnection) SendMessage(m *Message) {
+func (conn *WebsocketConnection) SendMessage(m *Message) error {
+	if m == nil || m.Type == nil {
+		return errors.New("cannot send nil message or message without type")
+	}
+	if conn.socket == nil {
+		return errors.New("cannot send message: socket is nil")
+	}
+
 	var msg *zerolog.Event
 
 	if *m.Type == Message_KEEPALIVE {
@@ -59,10 +66,15 @@ func (conn *WebsocketConnection) SendMessage(m *Message) {
 
 	msg.Stringer("data", m).Msg("Sending message")
 
-	bytes := getMessageBytes(m)
+	bytes, err := getMessageBytes(m)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to marshal message")
+		return err
+	}
 	log.Trace().Bytes("rawdata", bytes).Msg("Sending data")
 
 	conn.socket.SendBinary(bytes)
+	return nil
 }
 
 // SendRequest - sends request to the cam and returns await function. Await function waits for the response and returns it
@@ -96,7 +108,17 @@ func (conn *WebsocketConnection) SendRequest(reqType RequestType, requestData *R
 	conn.resHandlersMu.Unlock()
 
 	// Send request
-	conn.SendMessage(m)
+	if err := conn.SendMessage(m); err != nil {
+		log.Error().Err(err).Msg("Failed to send request")
+		// Clean up the response handler since we failed to send
+		conn.resHandlersMu.Lock()
+		delete(conn.resHandlers, id)
+		conn.resHandlersMu.Unlock()
+		// Return a function that immediately returns the error
+		return func(timeout time.Duration) (*Response, error) {
+			return nil, fmt.Errorf("failed to send request: %w", err)
+		}
+	}
 
 	// Return awaiter
 	return func(timeout time.Duration) (*Response, error) {
@@ -131,6 +153,12 @@ type unhandledRequest struct {
 }
 
 func (conn *WebsocketConnection) handleResponse(r *Response) {
+	// Nil checks to prevent panics
+	if r == nil || r.RequestId == nil || r.RequestType == nil {
+		log.Warn().Msg("Received response with missing required fields")
+		return
+	}
+
 	requestID := *r.RequestId
 	requestType := *r.RequestType
 
@@ -138,7 +166,9 @@ func (conn *WebsocketConnection) handleResponse(r *Response) {
 	unhandledReqCandidate, ok := conn.resHandlers[requestID]
 	conn.resHandlersMu.RUnlock()
 
-	if ok && requestType == *unhandledReqCandidate.Request.Type {
+	if ok && unhandledReqCandidate.Request != nil &&
+		unhandledReqCandidate.Request.Type != nil &&
+		requestType == *unhandledReqCandidate.Request.Type {
 		conn.resHandlersMu.Lock()
 		delete(conn.resHandlers, requestID)
 		conn.resHandlersMu.Unlock()
@@ -148,6 +178,11 @@ func (conn *WebsocketConnection) handleResponse(r *Response) {
 }
 
 func (conn *WebsocketConnection) handleMessage(m *Message) {
+	if m == nil || m.Type == nil {
+		log.Warn().Msg("Received message with missing type")
+		return
+	}
+
 	if *m.Type == Message_RESPONSE && m.Response != nil {
 		conn.handleResponse(m.Response)
 	}
@@ -162,11 +197,13 @@ func (conn *WebsocketConnection) handleMessage(m *Message) {
 	}
 }
 
-func getMessageBytes(data *Message) []byte {
+func getMessageBytes(data *Message) ([]byte, error) {
+	if data == nil {
+		return nil, errors.New("cannot marshal nil message")
+	}
 	out, err := proto.Marshal(data)
 	if err != nil {
-		log.Fatal().Err(err).Msg("Unable to marshal data")
+		return nil, fmt.Errorf("unable to marshal data: %w", err)
 	}
-
-	return out
+	return out, nil
 }

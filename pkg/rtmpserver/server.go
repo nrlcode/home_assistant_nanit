@@ -6,86 +6,433 @@ import (
 	"sync"
 	"time"
 
+	"github.com/indiefan/home_assistant_nanit/pkg/baby"
+	"github.com/indiefan/home_assistant_nanit/pkg/security/ipaccess"
+	"github.com/notedit/rtmp/av"
 	"github.com/notedit/rtmp/format/rtmp"
 	"github.com/rs/zerolog/log"
-	"github.com/indiefan/home_assistant_nanit/pkg/baby"
 )
+
+// Source IDs for timestamp remapping
+const (
+	SourceIDLocal  = 1 // Camera publishing directly to RTMP server
+	SourceIDRemote = 2 // Remote relay from Nanit cloud
+)
+
+// ServerConfig holds configuration for the RTMP server
+type ServerConfig struct {
+	// ListenAddr is the address to listen on (e.g., ":1935")
+	ListenAddr string
+
+	// Security options for IP-based access control
+	AllowedIPs     string // Comma-separated IPs/CIDRs
+	AllowedPresets string // Comma-separated preset names
+	LogDenied      bool   // Log denied connections
+	LogAllowed     bool   // Log allowed connections
+}
+
+// RTMPServer wraps the RTMP server and provides access to broadcasters
+type RTMPServer struct {
+	handler  *rtmpHandler
+	ipAccess *ipaccess.Controller
+	listener net.Listener
+	conns    map[net.Conn]struct{}
+	workers  sync.WaitGroup
+	closed   bool
+	mu       sync.Mutex
+}
 
 type rtmpHandler struct {
 	babyStateManager  *baby.StateManager
 	broadcastersMu    sync.RWMutex
-	broadcastersByUID map[string]*broadcaster
+	broadcastersByUID map[string]*PersistentBroadcaster
+
+	// Publisher wait channels for timeout detection
+	publisherWaitMu sync.Mutex
+	publisherWaitCh map[string]chan struct{}
+
+	// Track active local publishers count to detect reconnections vs drops
+	localPublishersMu sync.RWMutex
+	localPublishers   map[string]int // count of active publishers per baby
 }
 
-// StartRTMPServer - Blocking server
-func StartRTMPServer(addr string, babyStateManager *baby.StateManager) {
+// StartRTMPServer - Blocking server (legacy, starts in background and returns RTMPServer for access)
+// Deprecated: Use NewServer with ServerConfig for new code
+func StartRTMPServer(addr string, babyStateManager *baby.StateManager) *RTMPServer {
+	server := NewRTMPServer(babyStateManager)
+	go server.RunWithAddr(addr)
+	return server
+}
+
+// NewRTMPServer creates a new RTMP server without security config (backward compatible)
+// Empty rules deny all via a deny-all controller.
+func NewRTMPServer(babyStateManager *baby.StateManager) *RTMPServer {
+	ipAccess, _ := ipaccess.New(ipaccess.Config{
+		Logger: log.With().Str("component", "rtmp-ipaccess").Logger(),
+	})
+	if ipAccess == nil {
+		ipAccess = &ipaccess.Controller{}
+	}
+	return &RTMPServer{
+		handler:  newRtmpHandler(babyStateManager),
+		ipAccess: ipAccess,
+		conns:    make(map[net.Conn]struct{}),
+	}
+}
+
+// NewServer creates a new RTMP server with the given configuration.
+// Empty rules deny all: a deny-all controller is always installed.
+func NewServer(cfg ServerConfig, babyStateManager *baby.StateManager) (*RTMPServer, error) {
+	server := &RTMPServer{
+		handler: newRtmpHandler(babyStateManager),
+		conns:   make(map[net.Conn]struct{}),
+	}
+
+	ipAccessCfg := ipaccess.Config{
+		AllowedIPs:     cfg.AllowedIPs,
+		AllowedPresets: cfg.AllowedPresets,
+		LogDenied:      cfg.LogDenied,
+		LogAllowed:     cfg.LogAllowed,
+		Logger:         log.With().Str("component", "rtmp-ipaccess").Logger(),
+	}
+
+	ipAccess, err := ipaccess.New(ipAccessCfg)
+	if err != nil {
+		return nil, err
+	}
+
+	server.ipAccess = ipAccess
+	if cfg.AllowedIPs == "" && cfg.AllowedPresets == "" {
+		log.Warn().Msg("RTMP server running without IP access control - all connections will be denied")
+	} else {
+		log.Info().Str("config", ipAccess.String()).Msg("RTMP IP access control configured")
+	}
+
+	return server, nil
+}
+
+// Run starts the RTMP server (blocking) using config from NewServer
+func (srv *RTMPServer) Run(addr string) error {
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
-		log.Fatal().Str("addr", addr).Err(err).Msg("Unable to start RTMP server")
-		panic(err)
+		log.Error().Str("addr", addr).Err(err).Msg("Unable to start RTMP server")
+		return err
 	}
+
+	srv.mu.Lock()
+	srv.listener = lis
+	srv.mu.Unlock()
 
 	log.Info().Str("addr", addr).Msg("RTMP server started")
 
 	s := rtmp.NewServer()
-	s.HandleConn = newRtmpHandler(babyStateManager).handleConnection
+	s.HandleConn = srv.handleConnectionWithSecurity
 
 	for {
 		nc, err := lis.Accept()
 		if err != nil {
+			srv.mu.Lock()
+			closed := srv.closed
+			srv.mu.Unlock()
+			if closed {
+				return nil // Normal shutdown
+			}
+			log.Warn().Err(err).Msg("Error accepting connection")
 			time.Sleep(time.Second)
 			continue
 		}
-		go s.HandleNetConn(nc)
+		srv.mu.Lock()
+		srv.conns[nc] = struct{}{}
+		srv.workers.Add(1)
+		srv.mu.Unlock()
+		go func(conn net.Conn) {
+			defer func() {
+				srv.mu.Lock()
+				delete(srv.conns, conn)
+				srv.mu.Unlock()
+				srv.workers.Done()
+			}()
+			s.HandleNetConn(conn)
+		}(nc)
+	}
+}
+
+// Close gracefully shuts down the RTMP server, closing the listener and
+// all persistent broadcaster/viewer subscriptions.
+func (srv *RTMPServer) Close() error {
+	srv.mu.Lock()
+	srv.closed = true
+	lis := srv.listener
+	srv.listener = nil
+	conns := make([]net.Conn, 0, len(srv.conns))
+	for conn := range srv.conns {
+		conns = append(conns, conn)
+	}
+	srv.mu.Unlock()
+
+	srv.handler.broadcastersMu.Lock()
+	for _, pb := range srv.handler.broadcastersByUID {
+		pb.Close()
+	}
+	srv.handler.broadcastersByUID = make(map[string]*PersistentBroadcaster)
+	srv.handler.broadcastersMu.Unlock()
+
+	var closeErr error
+	if lis != nil {
+		closeErr = lis.Close()
+	}
+	for _, conn := range conns {
+		_ = conn.Close()
+	}
+	srv.workers.Wait()
+	return closeErr
+}
+
+// handleConnectionWithSecurity wraps handleConnection with IP access control.
+// Empty or nil rules fail closed before normal routing reads the URL.
+func (srv *RTMPServer) handleConnectionWithSecurity(c *rtmp.Conn, nc net.Conn) {
+	if srv.ipAccess == nil {
+		nc.Close()
+		return
+	}
+	remoteAddr := nc.RemoteAddr().String()
+	if !srv.ipAccess.IsAllowed(remoteAddr) {
+		nc.Close()
+		return
+	}
+
+	// Proceed with normal connection handling
+	srv.handler.handleConnection(c, nc)
+}
+
+// RunWithAddr starts the RTMP server on the given address (blocking)
+func (srv *RTMPServer) RunWithAddr(addr string) {
+	if err := srv.Run(addr); err != nil {
+		log.Error().Str("addr", addr).Err(err).Msg("RTMP server stopped")
+	}
+}
+
+// GetOrCreateBroadcaster returns an existing broadcaster or creates one for remote streaming
+// Returns the broadcast function that can be used to send packets (with remote source ID)
+func (srv *RTMPServer) GetOrCreateBroadcaster(babyUID string) func(pkt av.Packet) {
+	pb := srv.getOrCreatePersistentBroadcaster(babyUID)
+	return pb.GetBroadcastFunc(SourceIDRemote)
+}
+
+// getOrCreatePersistentBroadcaster gets or creates a PersistentBroadcaster for the baby
+func (srv *RTMPServer) getOrCreatePersistentBroadcaster(babyUID string) *PersistentBroadcaster {
+	srv.handler.broadcastersMu.Lock()
+	defer srv.handler.broadcastersMu.Unlock()
+
+	existing, exists := srv.handler.broadcastersByUID[babyUID]
+	if exists {
+		return existing
+	}
+
+	// Create a new persistent broadcaster
+	pb := NewPersistentBroadcaster(babyUID)
+	srv.handler.broadcastersByUID[babyUID] = pb
+	log.Info().Str("baby_uid", babyUID).Msg("Created persistent broadcaster")
+	return pb
+}
+
+// GetBroadcaster returns the PersistentBroadcaster for a baby, or nil if none exists
+func (srv *RTMPServer) GetBroadcaster(babyUID string) *PersistentBroadcaster {
+	srv.handler.broadcastersMu.RLock()
+	defer srv.handler.broadcastersMu.RUnlock()
+	return srv.handler.broadcastersByUID[babyUID]
+}
+
+// RemoveBroadcaster removes the broadcaster for a baby (used when stream stops permanently)
+// Note: With PersistentBroadcaster, this should rarely be called since broadcasters persist
+func (srv *RTMPServer) RemoveBroadcaster(babyUID string) {
+	srv.handler.broadcastersMu.Lock()
+	defer srv.handler.broadcastersMu.Unlock()
+
+	if pb, exists := srv.handler.broadcastersByUID[babyUID]; exists {
+		pb.Close()
+		delete(srv.handler.broadcastersByUID, babyUID)
+		log.Info().Str("baby_uid", babyUID).Msg("Removed persistent broadcaster")
+	}
+}
+
+// WaitForPublisher waits for a publisher to connect for the given babyUID.
+// Returns nil if publisher connects within timeout, or an error if timeout occurs.
+func (srv *RTMPServer) WaitForPublisher(babyUID string, timeout time.Duration) error {
+	// Check if publisher is already active (fixes race condition where camera
+	// connects before we start waiting)
+	if srv.handler.IsLocalPublisherActive(babyUID) {
+		log.Debug().Str("baby_uid", babyUID).Msg("Publisher already active, no need to wait")
+		return nil
+	}
+
+	// Create a channel to wait for publisher
+	ch := make(chan struct{})
+
+	srv.handler.publisherWaitMu.Lock()
+	// Double-check after acquiring lock (publisher may have connected while we were waiting for lock)
+	if srv.handler.IsLocalPublisherActive(babyUID) {
+		srv.handler.publisherWaitMu.Unlock()
+		log.Debug().Str("baby_uid", babyUID).Msg("Publisher connected while acquiring lock")
+		return nil
+	}
+	srv.handler.publisherWaitCh[babyUID] = ch
+	srv.handler.publisherWaitMu.Unlock()
+
+	// Cleanup on exit
+	defer func() {
+		srv.handler.publisherWaitMu.Lock()
+		delete(srv.handler.publisherWaitCh, babyUID)
+		srv.handler.publisherWaitMu.Unlock()
+	}()
+
+	select {
+	case <-ch:
+		return nil
+	case <-time.After(timeout):
+		return ErrPublisherTimeout
+	}
+}
+
+// ErrPublisherTimeout is returned when waiting for publisher times out
+var ErrPublisherTimeout = net.UnknownNetworkError("publisher connection timeout")
+
+// WaitForPublisherWithURL waits for a publisher at a specific URL to connect.
+// The URL should be the full RTMP URL (e.g., rtmp://host:port/local/babyUID_0)
+// This extracts the stream key from the URL and waits for that specific publisher.
+func (srv *RTMPServer) WaitForPublisherWithURL(babyUID, url string, timeout time.Duration) error {
+	// Extract stream key from URL (e.g., "babyuid_0" from "rtmp://host:port/local/babyuid_0")
+	// The URL path should be /local/{streamKey}
+	streamKey := babyUID // Default to babyUID if we can't parse
+	if idx := len(url) - 1; idx > 0 {
+		for i := idx; i >= 0; i-- {
+			if url[i] == '/' {
+				streamKey = url[i+1:]
+				break
+			}
+		}
+	}
+
+	// Check if publisher is already active
+	srv.handler.localPublishersMu.RLock()
+	if srv.handler.localPublishers[streamKey] > 0 {
+		srv.handler.localPublishersMu.RUnlock()
+		log.Debug().Str("stream_key", streamKey).Msg("Publisher already active for URL")
+		return nil
+	}
+	srv.handler.localPublishersMu.RUnlock()
+
+	// Create a channel to wait for this specific publisher
+	ch := make(chan struct{})
+
+	srv.handler.publisherWaitMu.Lock()
+	// Double-check after lock
+	srv.handler.localPublishersMu.RLock()
+	if srv.handler.localPublishers[streamKey] > 0 {
+		srv.handler.localPublishersMu.RUnlock()
+		srv.handler.publisherWaitMu.Unlock()
+		log.Debug().Str("stream_key", streamKey).Msg("Publisher connected while acquiring lock")
+		return nil
+	}
+	srv.handler.localPublishersMu.RUnlock()
+	srv.handler.publisherWaitCh[streamKey] = ch
+	srv.handler.publisherWaitMu.Unlock()
+
+	// Cleanup on exit
+	defer func() {
+		srv.handler.publisherWaitMu.Lock()
+		delete(srv.handler.publisherWaitCh, streamKey)
+		srv.handler.publisherWaitMu.Unlock()
+	}()
+
+	select {
+	case <-ch:
+		return nil
+	case <-time.After(timeout):
+		return ErrPublisherTimeout
 	}
 }
 
 func newRtmpHandler(babyStateManager *baby.StateManager) *rtmpHandler {
 	return &rtmpHandler{
-		broadcastersByUID: make(map[string]*broadcaster),
+		broadcastersByUID: make(map[string]*PersistentBroadcaster),
 		babyStateManager:  babyStateManager,
+		publisherWaitCh:   make(map[string]chan struct{}),
+		localPublishers:   make(map[string]int),
 	}
 }
 
-var rtmpURLRX = regexp.MustCompile(`^/local/([a-z0-9_-]+)$`)
+// rtmpURLRX matches:
+// - /local/{babyUID} or /local/{babyUID}_{slot} for publishers
+// - /live/{babyUID} for subscribers
+// Group 1: babyUID, Group 2 (optional): slot suffix including underscore
+var rtmpURLRX = regexp.MustCompile(`^/(local|live)/([a-z0-9-]+)(_[0-9]+)?$`)
 
 func (s *rtmpHandler) handleConnection(c *rtmp.Conn, nc net.Conn) {
 	sublog := log.With().Stringer("client_addr", nc.RemoteAddr()).Logger()
 
 	submatch := rtmpURLRX.FindStringSubmatch(c.URL.Path)
-	if len(submatch) != 2 {
+	if len(submatch) < 3 {
 		sublog.Warn().Str("path", c.URL.Path).Msg("Invalid RTMP stream requested")
 		nc.Close()
 		return
 	}
 
-	babyUID := submatch[1]
-	sublog = sublog.With().Str("baby_uid", babyUID).Logger()
+	// Group 1: "local" or "live", Group 2: babyUID, Group 3 (optional): slot suffix
+	babyUID := submatch[2]
+	slotSuffix := ""
+	if len(submatch) >= 4 {
+		slotSuffix = submatch[3] // e.g., "_0" or "_1"
+	}
+	streamKey := babyUID + slotSuffix // Full stream key for tracking
+
+	sublog = sublog.With().Str("baby_uid", babyUID).Str("stream_key", streamKey).Logger()
 
 	if c.Publishing {
-		sublog.Info().Msg("New stream publisher connected")
-		publisher := s.getNewPublisher(babyUID)
+		sublog.Info().Msg("New local stream publisher connected")
+		broadcastFunc := s.registerLocalPublisher(babyUID, slotSuffix, streamKey)
 
-		s.babyStateManager.Update(babyUID, *baby.NewState().SetStreamState(baby.StreamState_Alive))
+		// Signal any waiters that publisher connected
+		// Check both streamKey-specific and babyUID-general waiters
+		s.publisherWaitMu.Lock()
+		if ch, exists := s.publisherWaitCh[streamKey]; exists {
+			close(ch)
+			delete(s.publisherWaitCh, streamKey)
+		}
+		if ch, exists := s.publisherWaitCh[babyUID]; exists {
+			close(ch)
+			delete(s.publisherWaitCh, babyUID)
+		}
+		s.publisherWaitMu.Unlock()
 
 		for {
 			pkt, err := c.ReadPacket()
 			if err != nil {
-				sublog.Warn().Err(err).Msg("Publisher stream closed unexpectedly")
-				s.babyStateManager.Update(babyUID, *baby.NewState().SetStreamState(baby.StreamState_Unhealthy))
-				s.closePublisher(babyUID, publisher)
+				// Unregister and check if other publishers remain
+				remaining := s.unregisterLocalPublisher(babyUID, streamKey)
+
+				if remaining > 0 {
+					// Normal reconnection - another publisher already took over
+					sublog.Info().Err(err).Msg("Local publisher stream closed (new connection active)")
+				} else {
+					// No other publisher - this is an actual stream drop
+					sublog.Warn().Err(err).Msg("Local publisher stream closed (no replacement)")
+					s.babyStateManager.Update(babyUID, *baby.NewState().SetStreamState(baby.StreamState_Unhealthy))
+				}
 				return
 			}
 
-			publisher.broadcast(pkt)
+			// Measured health: only observed media marks the stream alive.
+			s.babyStateManager.Update(babyUID, *baby.NewState().SetStreamState(baby.StreamState_Alive))
+			broadcastFunc(pkt)
 		}
 
 	} else {
 		sublog.Debug().Msg("New stream subscriber connected")
-		subscriber, unsubscribe := s.getNewSubscriber(babyUID)
+		subscription := s.getNewSubscriber(babyUID)
 
-		if subscriber == nil {
-			sublog.Warn().Msg("No stream publisher registered yet, closing subscriber stream")
+		if subscription == nil {
+			sublog.Warn().Msg("No broadcaster registered yet, closing subscriber stream")
 			nc.Close()
 			return
 		}
@@ -93,9 +440,9 @@ func (s *rtmpHandler) handleConnection(c *rtmp.Conn, nc net.Conn) {
 		closeC := c.CloseNotify()
 		for {
 			select {
-			case pkt, open := <-subscriber.pktC:
+			case pkt, open := <-subscription.Packets():
 				if !open {
-					sublog.Debug().Msg("Closing subscriber because publisher quit")
+					sublog.Debug().Msg("Subscription closed")
 					nc.Close()
 					return
 				}
@@ -104,50 +451,87 @@ func (s *rtmpHandler) handleConnection(c *rtmp.Conn, nc net.Conn) {
 
 			case <-closeC:
 				sublog.Debug().Msg("Stream subscriber disconnected")
-				unsubscribe()
+				subscription.Unsubscribe()
+				return
 			}
 		}
 	}
 }
 
-func (s *rtmpHandler) getNewPublisher(babyUID string) *broadcaster {
-	broadcaster := newBroadcaster()
-
+// registerLocalPublisher gets/creates a PersistentBroadcaster and returns the local broadcast function
+// slotSuffix is the optional slot identifier (e.g., "_0", "_1"), empty for legacy single-stream mode
+// streamKey is the full key (babyUID + slotSuffix) for publisher tracking
+func (s *rtmpHandler) registerLocalPublisher(babyUID, slotSuffix, streamKey string) func(pkt av.Packet) {
 	s.broadcastersMu.Lock()
-	existingBroadcaster, hadExistingBroadcaster := s.broadcastersByUID[babyUID]
-	s.broadcastersByUID[babyUID] = broadcaster
+	pb, exists := s.broadcastersByUID[babyUID]
+	if !exists {
+		pb = NewPersistentBroadcaster(babyUID)
+		s.broadcastersByUID[babyUID] = pb
+		log.Info().Str("baby_uid", babyUID).Msg("Created persistent broadcaster for local publisher")
+	}
 	s.broadcastersMu.Unlock()
 
-	if hadExistingBroadcaster {
-		log.Warn().Msg("Baby already has active publisher, closing existing subscribers")
-		go existingBroadcaster.closeSubscribers()
+	// Increment local publisher count (by babyUID for backward compatibility)
+	s.localPublishersMu.Lock()
+	s.localPublishers[babyUID]++
+	count := s.localPublishers[babyUID]
+	// Also track by streamKey for pool-aware lookups, unless it aliases babyUID.
+	if streamKey != babyUID {
+		s.localPublishers[streamKey]++
+	}
+	s.localPublishersMu.Unlock()
+
+	log.Info().Str("baby_uid", babyUID).Str("stream_key", streamKey).Int("active_count", count).Msg("Local publisher registered")
+
+	// Determine source ID based on slot suffix
+	sourceID := SourceIDLocal // Default for legacy single-stream
+	if slotSuffix == "_0" {
+		sourceID = 10 // Pool slot 0
+	} else if slotSuffix == "_1" {
+		sourceID = 11 // Pool slot 1
 	}
 
-	return broadcaster
+	return pb.GetBroadcastFunc(sourceID)
 }
 
-func (s *rtmpHandler) getNewSubscriber(babyUID string) (*subscriber, func()) {
+// unregisterLocalPublisher decrements the publisher count and returns the remaining count
+func (s *rtmpHandler) unregisterLocalPublisher(babyUID, streamKey string) int {
+	s.localPublishersMu.Lock()
+	s.localPublishers[babyUID]--
+	remaining := s.localPublishers[babyUID]
+	if remaining <= 0 {
+		delete(s.localPublishers, babyUID)
+		remaining = 0
+	}
+	// Also decrement streamKey count unless it aliases babyUID.
+	if streamKey != babyUID {
+		s.localPublishers[streamKey]--
+		if s.localPublishers[streamKey] <= 0 {
+			delete(s.localPublishers, streamKey)
+		}
+	}
+	s.localPublishersMu.Unlock()
+
+	log.Info().Str("baby_uid", babyUID).Str("stream_key", streamKey).Int("remaining_count", remaining).Msg("Local publisher unregistered")
+	return remaining
+}
+
+// getNewSubscriber creates a subscription to the PersistentBroadcaster
+func (s *rtmpHandler) getNewSubscriber(babyUID string) *Subscription {
 	s.broadcastersMu.RLock()
-	broadcaster, hasBroadcaster := s.broadcastersByUID[babyUID]
+	pb, hasBroadcaster := s.broadcastersByUID[babyUID]
 	s.broadcastersMu.RUnlock()
 
 	if !hasBroadcaster {
-		return nil, nil
+		return nil
 	}
 
-	sub := broadcaster.newSubscriber()
-
-	return sub, func() { broadcaster.unsubscribe(sub) }
+	return pb.Subscribe()
 }
 
-func (s *rtmpHandler) closePublisher(babyUID string, b *broadcaster) {
-	s.broadcastersMu.Lock()
-	if currBroadcaster, hasExistingBroadcaster := s.broadcastersByUID[babyUID]; hasExistingBroadcaster {
-		if currBroadcaster == b {
-			delete(s.broadcastersByUID, babyUID)
-		}
-	}
-	s.broadcastersMu.Unlock()
-
-	b.closeSubscribers()
+// IsLocalPublisherActive returns whether a local publisher is currently active for the baby
+func (s *rtmpHandler) IsLocalPublisherActive(babyUID string) bool {
+	s.localPublishersMu.RLock()
+	defer s.localPublishersMu.RUnlock()
+	return s.localPublishers[babyUID] > 0
 }

@@ -1,0 +1,17 @@
+# Frigate example input for the merged Nanit bridge (config/doc smoke only).
+# Size fps/dimensions to your separately configured camera; do not invent
+# resolution here. Requires the bridge RTMP ACL to allow the camera publisher
+# IP via rtmp_allowed_ips and the documented hassio/frigate/loopback consumer
+# presets. Live-camera decoding is NOT verified by automated tests.
+cameras:
+  nanit_baby:
+    enabled: true
+    ffmpeg:
+      # Placeholder host/UID: replace with your HA host and baby UID.
+      inputs:
+        - path: rtmp://192.168.1.100:1935/local/REPLACE_WITH_BABY_UID
+          input_args: preset-rtmp-generic
+          roles:
+            - detect
+    detect:
+      enabled: true

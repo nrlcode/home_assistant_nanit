@@ -1,0 +1,37 @@
+name: Nanit Bridge
+version: "1.0.0"
+slug: nanit
+description: >-
+  Bridges a Nanit baby monitor to Home Assistant: local RTMP camera feed plus
+  MQTT sensors (temperature, humidity, motion, sound, night mode) and controls
+  (night light, standby) with auto-discovery.
+url: https://github.com/WColan/home_assistant_nanit
+arch:
+  - aarch64
+  - amd64
+  - armv7
+init: false
+startup: application
+boot: auto
+host_network: true
+ports:
+  1935/tcp: 1935
+services:
+  - mqtt:need
+backup_exclude:
+  - /data/video
+  - /data/log
+options:
+  nanit_refresh_token: ""
+  rtmp_allowed_presets: "hassio,frigate,localhost"
+  mqtt_discovery: true
+  event_polling: true
+  log_level: info
+schema:
+  nanit_refresh_token: password
+  rtmp_addr: str?
+  rtmp_allowed_presets: str
+  rtmp_allowed_ips: str?
+  mqtt_discovery: bool
+  event_polling: bool
+  log_level: list(trace|debug|info|warn|error)

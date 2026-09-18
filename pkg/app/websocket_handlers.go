@@ -56,9 +56,10 @@ func requestLocalStreaming(babyUID string, targetURL string, streamingStatus cli
 				time.Sleep(300 * time.Second)
 				continue
 			} else if err.Error() != "Request timeout" {
-				if stateManager.GetBabyState(babyUID).GetStreamState() == baby.StreamState_Alive {
+				babyState := stateManager.GetBabyState(babyUID)
+				if babyState != nil && babyState.GetStreamState() == baby.StreamState_Alive {
 					log.Info().Err(err).Msg("Failed to request local streaming, but stream seems to be alive from previous run")
-				} else if stateManager.GetBabyState(babyUID).GetStreamState() == baby.StreamState_Unhealthy {
+				} else if babyState != nil && babyState.GetStreamState() == baby.StreamState_Unhealthy {
 					log.Error().Err(err).Msg("Failed to request local streaming and stream seems to be dead")
 					stateManager.Update(babyUID, *baby.NewState().SetStreamRequestState(baby.StreamRequestState_RequestFailed))
 				} else {
@@ -69,7 +70,8 @@ func requestLocalStreaming(babyUID string, targetURL string, streamingStatus cli
 				return
 			}
 
-			if !stateManager.GetBabyState(babyUID).GetIsWebsocketAlive() {
+			babyState := stateManager.GetBabyState(babyUID)
+			if babyState == nil || !babyState.GetIsWebsocketAlive() {
 				return
 			}
 

@@ -3,8 +3,8 @@ package utils_test
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/indiefan/home_assistant_nanit/pkg/utils"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestTailer(t *testing.T) {

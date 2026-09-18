@@ -1,17 +1,21 @@
 package baby
 
 import (
+	"errors"
 	"regexp"
-
-	"github.com/rs/zerolog/log"
 )
 
 var validUID = regexp.MustCompile(`^[a-z0-9_-]+$`)
 
-// EnsureValidBabyUID - Checks that Baby UID does not contain any bad characters
+// ErrInvalidBabyUID is returned when a baby UID contains unsafe characters
+var ErrInvalidBabyUID = errors.New("baby UID contains unsafe characters")
+
+// ValidateBabyUID - Checks that Baby UID does not contain any bad characters
 // This is necessary because we use it as part of file paths
-func EnsureValidBabyUID(babyUID string) {
+// Returns error if UID is invalid
+func ValidateBabyUID(babyUID string) error {
 	if !validUID.MatchString(babyUID) {
-		log.Fatal().Str("uid", babyUID).Msg("Baby UID contains unsafe characters")
+		return ErrInvalidBabyUID
 	}
+	return nil
 }

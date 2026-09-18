@@ -1,0 +1,230 @@
+package mqtt
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+
+	"github.com/indiefan/home_assistant_nanit/pkg/baby"
+	"github.com/rs/zerolog/log"
+)
+
+// Home Assistant MQTT discovery.
+//
+// On (re)connect we publish a retained discovery config for every entity of
+// every known baby to `<discovery_prefix>/<component>/nanit_<uid>/<object>/config`.
+// Home Assistant then creates a "Nanit" device with all of the sensors and the
+// two writable controls (night light, standby) automatically - no YAML.
+
+type haDevice struct {
+	Identifiers  []string `json:"identifiers"`
+	Name         string   `json:"name"`
+	Manufacturer string   `json:"manufacturer"`
+	Model        string   `json:"model"`
+}
+
+type haAvailability struct {
+	Topic               string `json:"topic"`
+	PayloadAvailable    string `json:"payload_available"`
+	PayloadNotAvailable string `json:"payload_not_available"`
+}
+
+type haEntity struct {
+	Name              string           `json:"name"`
+	UniqueID          string           `json:"unique_id"`
+	StateTopic        string           `json:"state_topic"`
+	CommandTopic      string           `json:"command_topic,omitempty"`
+	DeviceClass       string           `json:"device_class,omitempty"`
+	StateClass        string           `json:"state_class,omitempty"`
+	UnitOfMeasurement string           `json:"unit_of_measurement,omitempty"`
+	Icon              string           `json:"icon,omitempty"`
+	PayloadOn         string           `json:"payload_on,omitempty"`
+	PayloadOff        string           `json:"payload_off,omitempty"`
+	StateOn           string           `json:"state_on,omitempty"`
+	StateOff          string           `json:"state_off,omitempty"`
+	Availability      []haAvailability `json:"availability,omitempty"`
+	Device            haDevice         `json:"device"`
+}
+
+type entitySpec struct {
+	component string // "sensor" | "binary_sensor" | "switch"
+	object    string // object_id suffix
+	friendly  string
+	topic     string // state topic key (under nanit/babies/<uid>/)
+	cmd       string // command topic key, for switches
+	class     string
+	stateCls  string
+	unit      string
+	icon      string
+}
+
+var entitySpecs = []entitySpec{
+	{"sensor", "temperature", "Temperature", "temperature", "", "temperature", "measurement", "°C", ""},
+	{"sensor", "humidity", "Humidity", "humidity", "", "humidity", "measurement", "%", ""},
+	{"sensor", "motion", "Last motion", "motion", "", "timestamp", "", "", "mdi:motion-sensor"},
+	{"sensor", "sound", "Last sound", "sound", "", "timestamp", "", "", "mdi:ear-hearing"},
+	{"binary_sensor", "motion_active", "Motion", "motion_active", "", "motion", "", "", ""},
+	{"binary_sensor", "sound_active", "Sound", "sound_active", "", "sound", "", "", ""},
+	{"binary_sensor", "night", "Night mode", "is_night", "", "", "", "", "mdi:weather-night"},
+	{"binary_sensor", "stream", "Stream", "is_stream_alive", "", "connectivity", "", "", ""},
+	{"switch", "night_light", "Night light", "night_light", "night_light/switch", "", "", "", "mdi:lightbulb-night"},
+	{"switch", "standby", "Standby", "standby", "standby/switch", "", "", "", "mdi:power-standby"},
+}
+
+// streamURLForBaby returns the advertised rtmp:// URL for a baby, or "" when
+// RTMP is disabled or the configured address is not a valid explicit host:port.
+func streamURLForBaby(rtmpAddr, babyUID string) string {
+	rtmpAddr = strings.TrimSpace(rtmpAddr)
+	if rtmpAddr == "" || babyUID == "" {
+		return ""
+	}
+	addr := strings.TrimPrefix(strings.TrimPrefix(rtmpAddr, "rtmp://"), "rtmps://")
+	// Require explicit host:port; never guess a container IP.
+	parts := strings.Split(addr, ":")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return ""
+	}
+	for _, c := range parts[1] {
+		if c < '0' || c > '9' {
+			return ""
+		}
+	}
+	return fmt.Sprintf("rtmp://%s/local/%s", addr, babyUID)
+}
+
+// publishDiscovery publishes retained HA discovery configs for one baby.
+// It returns the number of failed publications; failures are logged and
+// retried on the next successful connection, never cached as published.
+func (conn *Connection) publishDiscovery(babyUID, babyName string) int {
+	if !conn.Opts.DiscoveryEnabled {
+		return 0
+	}
+
+	discoveryPrefix := conn.Opts.DiscoveryPrefix
+	if discoveryPrefix == "" {
+		discoveryPrefix = "homeassistant"
+	}
+
+	name := babyName
+	if name == "" {
+		short := babyUID
+		if len(short) > 6 {
+			short = short[:6]
+		}
+		name = "Nanit " + short
+	}
+
+	dev := haDevice{
+		Identifiers:  []string{"nanit_" + babyUID},
+		Name:         name,
+		Manufacturer: "Nanit",
+		Model:        "Baby Monitor",
+	}
+	avail := []haAvailability{{
+		Topic:               fmt.Sprintf("%v/status", conn.Opts.TopicPrefix),
+		PayloadAvailable:    "online",
+		PayloadNotAvailable: "offline",
+	}}
+
+	base := fmt.Sprintf("%v/babies/%v", conn.Opts.TopicPrefix, babyUID)
+	failures := 0
+	client := conn.GetClient()
+
+	publishOne := func(component, object string, e haEntity) {
+		conn.mu.Lock()
+		shutdown := conn.shutdown
+		conn.mu.Unlock()
+		if shutdown {
+			return
+		}
+		payload, err := json.Marshal(e)
+		if err != nil {
+			log.Error().Err(err).Str("object", object).Msg("Unable to marshal discovery config")
+			failures++
+			return
+		}
+		topic := fmt.Sprintf("%v/%v/nanit_%v/%v/config", discoveryPrefix, component, babyUID, object)
+		if token := client.Publish(topic, 1, true, payload); token.Wait() && token.Error() != nil {
+			log.Error().Err(token.Error()).Str("topic", topic).Msg("Unable to publish discovery config")
+			failures++
+		} else {
+			log.Debug().Str("topic", topic).Msg("Published HA discovery config")
+		}
+	}
+
+	for _, s := range entitySpecs {
+		e := haEntity{
+			Name:              s.friendly,
+			UniqueID:          fmt.Sprintf("nanit_%v_%v", babyUID, s.object),
+			StateTopic:        fmt.Sprintf("%v/%v", base, s.topic),
+			DeviceClass:       s.class,
+			StateClass:        s.stateCls,
+			UnitOfMeasurement: s.unit,
+			Icon:              s.icon,
+			Availability:      avail,
+			Device:            dev,
+		}
+		if s.component == "binary_sensor" || s.component == "switch" {
+			e.PayloadOn = "true"
+			e.PayloadOff = "false"
+		}
+		if s.component == "switch" {
+			e.CommandTopic = fmt.Sprintf("%v/%v", base, s.cmd)
+			e.StateOn = "true"
+			e.StateOff = "false"
+		}
+		publishOne(s.component, s.object, e)
+	}
+
+	// Conditional stream_url sensor, only when RTMP is configured with an
+	// explicit valid advertised address.
+	if url := streamURLForBaby(conn.Opts.RTMPAddr, babyUID); url != "" {
+		e := haEntity{
+			Name:         "Stream URL",
+			UniqueID:     fmt.Sprintf("nanit_%v_stream_url", babyUID),
+			StateTopic:   fmt.Sprintf("%v/stream_url", base),
+			Icon:         "mdi:video",
+			Availability: avail,
+			Device:       dev,
+		}
+		publishOne("sensor", "stream_url", e)
+		// Publish the retained URL value itself.
+		conn.mu.Lock()
+		shutdown := conn.shutdown
+		conn.mu.Unlock()
+		if !shutdown {
+			topic := fmt.Sprintf("%v/stream_url", base)
+			if token := client.Publish(topic, 1, true, url); token.Wait() && token.Error() != nil {
+				log.Error().Err(token.Error()).Str("topic", topic).Msg("Unable to publish stream_url value")
+				failures++
+			}
+		}
+	}
+
+	// Measured stream state starts false until media is observed; never an
+	// optimistic true. A live stream re-affirms via state updates.
+	// Always publish the retained boolean so reconnect restores true when alive.
+	streamAlive := false
+	if conn.StateManager != nil {
+		if st := conn.StateManager.GetBabyState(babyUID); st != nil && st.GetStreamState() == baby.StreamState_Alive {
+			streamAlive = true
+		}
+	}
+	conn.mu.Lock()
+	shutdown := conn.shutdown
+	conn.mu.Unlock()
+	if !shutdown {
+		topic := fmt.Sprintf("%v/is_stream_alive", base)
+		val := "false"
+		if streamAlive {
+			val = "true"
+		}
+		if token := client.Publish(topic, 0, true, val); token.Wait() && token.Error() != nil {
+			log.Error().Err(token.Error()).Str("topic", topic).Msg("Unable to publish stream state")
+			failures++
+		}
+	}
+
+	log.Info().Str("baby", babyUID).Str("name", name).Int("failures", failures).Msg("Published Home Assistant MQTT discovery")
+	return failures
+}

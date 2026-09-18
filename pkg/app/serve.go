@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/rs/zerolog/log"
 	"github.com/indiefan/home_assistant_nanit/pkg/baby"
+	"github.com/rs/zerolog/log"
 )
 
 func serve(babies []baby.Baby, dataDir DataDirectories) {

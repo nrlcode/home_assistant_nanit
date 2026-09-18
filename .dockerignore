@@ -1,6 +1,10 @@
 *
 !./cmd
 !./pkg
-!./scripts
 !./go.mod
 !./go.sum
+!./rootfs
+!./config.yaml
+!./DOCS.md
+!./LICENSE
+!./docs

@@ -24,10 +24,34 @@ const (
 	StreamState_Alive
 )
 
+// StreamType indicates the type of video stream being used
+type StreamType int32
+
+const (
+	StreamType_None   StreamType = iota // No active stream
+	StreamType_Local                    // Local camera RTMP push
+	StreamType_Remote                   // Remote relay (rtmps://media-secured.nanit.com)
+)
+
+// String returns the string representation of StreamType
+func (st StreamType) String() string {
+	switch st {
+	case StreamType_None:
+		return "None"
+	case StreamType_Local:
+		return "Local"
+	case StreamType_Remote:
+		return "Remote"
+	default:
+		return "Unknown"
+	}
+}
+
 // State - struct holding information about state of a single baby
 type State struct {
 	StreamState        *StreamState        `internal:"true"`
 	StreamRequestState *StreamRequestState `internal:"true"`
+	StreamType         *StreamType         `internal:"true"`
 	IsWebsocketAlive   *bool               `internal:"true"`
 
 	MotionTimestamp  *int32 // int32 is used to represent UTC timestamp
@@ -191,6 +215,21 @@ func (state *State) GetStreamState() StreamState {
 	return StreamState_Unknown
 }
 
+// SetStreamType - mutates field, returns itself
+func (state *State) SetStreamType(value StreamType) *State {
+	state.StreamType = &value
+	return state
+}
+
+// GetStreamType - safely returns value
+func (state *State) GetStreamType() StreamType {
+	if state.StreamType != nil {
+		return *state.StreamType
+	}
+
+	return StreamType_None
+}
+
 // SetIsNight - mutates field, returns itself
 func (state *State) SetIsNight(value bool) *State {
 	state.IsNight = &value
@@ -214,7 +253,7 @@ func (state *State) SetTemperature(value bool) *State {
 
 // GetIsWebsocketAlive - safely returns value
 func (state *State) GetIsWebsocketAlive() bool {
-	if state.StreamState != nil {
+	if state.IsWebsocketAlive != nil {
 		return *state.IsWebsocketAlive
 	}
 

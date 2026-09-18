@@ -1,0 +1,22 @@
+configuration:
+  nanit_refresh_token:
+    name: Nanit refresh token
+    description: Refresh token used to authenticate with the Nanit account.
+  rtmp_addr:
+    name: RTMP address
+    description: Address advertised to the camera for the optional local RTMP feed.
+  rtmp_allowed_presets:
+    name: RTMP allowed presets
+    description: Comma-separated trusted network presets for RTMP access.
+  rtmp_allowed_ips:
+    name: RTMP allowed IPs
+    description: Comma-separated IP addresses or CIDRs allowed to publish or play RTMP.
+  mqtt_discovery:
+    name: MQTT discovery
+    description: Publish Home Assistant MQTT discovery messages.
+  event_polling:
+    name: Event polling
+    description: Poll Nanit events for motion and sound updates.
+  log_level:
+    name: Log level
+    description: Logging verbosity for the bridge.
