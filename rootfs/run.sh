@@ -25,8 +25,19 @@ else
 fi
 
 # RTMP IP access control (deny-first; explicit camera peer required)
-export NANIT_RTMP_ALLOWED_PRESETS="$(bashio::config 'rtmp_allowed_presets')"
-export NANIT_RTMP_ALLOWED_IPS="$(bashio::config 'rtmp_allowed_ips')"
+# Optional keys may be absent: bashio::config returns the literal string
+# "null" for missing keys, which the Go parser rejects as an IP address.
+# Guard with has_value so absent means empty (deny-all on top of presets).
+if bashio::config.has_value 'rtmp_allowed_presets'; then
+  export NANIT_RTMP_ALLOWED_PRESETS="$(bashio::config 'rtmp_allowed_presets')"
+else
+  export NANIT_RTMP_ALLOWED_PRESETS=""
+fi
+if bashio::config.has_value 'rtmp_allowed_ips'; then
+  export NANIT_RTMP_ALLOWED_IPS="$(bashio::config 'rtmp_allowed_ips')"
+else
+  export NANIT_RTMP_ALLOWED_IPS=""
+fi
 
 # MQTT - wired automatically to the Mosquitto add-on
 export NANIT_MQTT_ENABLED="true"
