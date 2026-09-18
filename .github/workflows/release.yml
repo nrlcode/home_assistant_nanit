@@ -3,6 +3,7 @@ name: Publish Docker image
 on:
   release:
     types: [published]
+  workflow_dispatch:
 
 env:
   REGISTRY_IMAGE: ghcr.io/nrlcode/home_assistant_nanit
