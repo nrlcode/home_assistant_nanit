@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.3
+
+- Add date-addressable historical sleep timeline selection with bounded private storage and MQTT discovery.
+
 ## Unreleased
 
 - Fix sleep event decoding: Nanit encodes `updated_at`/`time` as numbers or
