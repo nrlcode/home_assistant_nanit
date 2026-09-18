@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/indiefan/home_assistant_nanit/pkg/baby"
 	"github.com/indiefan/home_assistant_nanit/pkg/message"
 )
 
@@ -75,6 +76,24 @@ func (f *sleepManagerFetcher) TryFetchLastSleepEventCtx(ctx context.Context, uid
 		return nil, f.err
 	}
 	return nil, nil
+}
+
+func TestSetSleepTimelineDateValidationAndIsolation(t *testing.T) {
+	today := time.Now().UTC().Format("2006-01-02")
+	future := time.Now().UTC().Add(24 * time.Hour).Format("2006-01-02")
+	mqtt := NewMockMQTTClient()
+	m := NewManager(ManagerConfig{TopicPrefix: "nanit", Babies: []baby.Baby{{UID: "a"}, {UID: "b"}}}, &sleepManagerFetcher{}, mqtt)
+	for _, date := range []string{"", "2026-9-18", "2026-02-30", future, today} {
+		m.SetSleepTimelineDate("a", date)
+		if got, _ := mqtt.GetPublished("nanit/babies/a/sleep_timeline_history/availability"); got != "offline" {
+			t.Fatalf("date=%q availability=%q", date, got)
+		}
+	}
+	m.SetSleepTimelineDate("a", "2024-01-01")
+	m.SetSleepTimelineDate("b", "2024-01-02")
+	if m.selectedDates["a"] != "2024-01-01" || m.selectedDates["b"] != "2024-01-02" {
+		t.Fatalf("selected dates=%v", m.selectedDates)
+	}
 }
 
 func TestSleepManagerIsolatesBabiesAndStales(t *testing.T) {

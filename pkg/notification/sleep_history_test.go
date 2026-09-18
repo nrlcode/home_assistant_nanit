@@ -81,7 +81,7 @@ func TestSleepHistoryRejectsSymlinkAndUnknownSchema(t *testing.T) {
 func TestSleepHistoryEnforcesTotalBudgetAcrossCameras(t *testing.T) {
 	dir := t.TempDir()
 	oldest := ""
-	for i := 0; i < 17; i++ {
+	for i := 0; i < 65; i++ {
 		scope := fmt.Sprintf("%064x", i+1)
 		path := filepath.Join(dir, scope+".json")
 		if err := os.WriteFile(path, make([]byte, sleepHistoryMaxFile-1), 0o600); err != nil {
@@ -125,5 +125,36 @@ func TestSleepHistoryEnforcesTotalBudgetAcrossCameras(t *testing.T) {
 	}
 	if total > sleepHistoryMaxTotal {
 		t.Fatalf("history total=%d exceeds %d", total, sleepHistoryMaxTotal)
+	}
+}
+
+func TestSleepHistoryReportForDate(t *testing.T) {
+	h := newSleepHistory("")
+	h.files["scope"] = &historyFile{Reports: []historyReport{{Key: "2026-09-17||night", Revision: 1}, {Key: "2026-09-18||night", Revision: 2}}}
+	r, status := h.reportForDate("scope", "2026-09-18")
+	if status != "ok" || r == nil || r.Key != "2026-09-18||night" {
+		t.Fatalf("reportForDate = %#v, %q", r, status)
+	}
+	if r, status = h.reportForDate("scope", "2026-09-19"); r != nil || status != "unavailable" {
+		t.Fatalf("missing reportForDate = %#v, %q", r, status)
+	}
+}
+
+func TestReportForDateRejectsInvalidEmptyAndFutureDates(t *testing.T) {
+	f := &historyFile{Reports: []historyReport{{Key: "2026-09-18||night"}}}
+	future := time.Now().UTC().Add(24 * time.Hour).Format("2006-01-02")
+	for _, date := range []string{"", "2026-9-18", "2026-02-30", future} {
+		if report, status := reportForDate(f, date); report != nil || status != "unavailable" {
+			t.Fatalf("date %q = %#v, %q", date, report, status)
+		}
+	}
+}
+
+func TestReportForDateReturnsSelectedReport(t *testing.T) {
+	f := &historyFile{Reports: []historyReport{{Key: time.Now().UTC().Format("2006-01-02") + "||night", Revision: 2}}}
+	date := time.Now().UTC().Format("2006-01-02")
+	report, status := reportForDate(f, date)
+	if status != "ok" || report == nil || report.Revision != 2 {
+		t.Fatalf("report=%#v status=%q", report, status)
 	}
 }

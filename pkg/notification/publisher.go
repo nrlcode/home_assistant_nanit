@@ -251,6 +251,54 @@ func (p *Publisher) PublishSleepTimeline(babyUID string, history *historyFile) e
 	return p.client.Publish(base+"/sleep_timeline/availability", 0, true, "online")
 }
 
+func (p *Publisher) PublishSleepTimelineForDate(babyUID, date string, history *historyFile) error {
+	base := fmt.Sprintf("%s/babies/%s", p.topicPrefix, babyUID)
+	selected, status := reportForDate(history, date)
+	if status != "ok" || selected == nil {
+		_ = p.client.Publish(base+"/sleep_timeline_history", 0, true, "")
+		return p.client.Publish(base+"/sleep_timeline_history/availability", 0, true, "offline")
+	}
+	attrs := map[string]interface{}{"rows": []map[string]interface{}{}, "truncated": false, "omitted_rows": 0, "window_start": selected.WindowStart, "window_end": selected.WindowEnd, "revision": selected.Revision, "history_status": history.HistoryStatus, "report_date": date}
+	rows := attrs["rows"].([]map[string]interface{})
+	for _, in := range selected.Intervals {
+		if len(rows) >= 64 {
+			attrs["truncated"] = true
+			attrs["omitted_rows"] = attrs["omitted_rows"].(int) + 1
+			continue
+		}
+		rows = append(rows, map[string]interface{}{"type": "state", "state": in.State, "start": in.Start, "end": in.End, "obsolete": in.Obsolete})
+	}
+	for _, ev := range history.Events {
+		if (selected.WindowStart != "" && ev.OccurredAt < selected.WindowStart) || (selected.WindowEnd != "" && ev.OccurredAt >= selected.WindowEnd) {
+			continue
+		}
+		if len(rows) >= 64 {
+			attrs["truncated"] = true
+			attrs["omitted_rows"] = attrs["omitted_rows"].(int) + 1
+			continue
+		}
+		rows = append(rows, map[string]interface{}{"type": "event", "event_type": ev.Key, "visit_type": ev.Subtype, "occurred_at": ev.OccurredAt})
+	}
+	attrs["rows"] = rows
+	for {
+		b, _ := json.Marshal(attrs)
+		if len(b) <= 8192 || len(rows) == 0 {
+			break
+		}
+		rows = rows[:len(rows)-1]
+		attrs["rows"] = rows
+		attrs["truncated"] = true
+		attrs["omitted_rows"] = attrs["omitted_rows"].(int) + 1
+	}
+	if err := p.client.Publish(base+"/sleep_timeline_history", 0, true, selected.Key); err != nil {
+		return err
+	}
+	if err := p.publishJSON(base+"/sleep_timeline_history_attributes", attrs); err != nil {
+		return err
+	}
+	return p.client.Publish(base+"/sleep_timeline_history/availability", 0, true, "online")
+}
+
 func (p *Publisher) publishJSON(topic string, value interface{}) error {
 	payload, err := json.Marshal(value)
 	if err != nil {

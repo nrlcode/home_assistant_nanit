@@ -2,10 +2,81 @@ package notification
 
 import (
 	"encoding/json"
+	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 )
+
+func TestPublishSleepTimelineForDateValidationAndSelection(t *testing.T) {
+	client := NewMockMQTTClient()
+	p := NewPublisher(client, "nanit")
+	date := time.Now().UTC().Format("2006-01-02")
+	history := &historyFile{HistoryStatus: "ok", Reports: []historyReport{{Key: date + "||night", Revision: 3}}}
+	if err := p.PublishSleepTimelineForDate("baby", date, history); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := client.GetPublished("nanit/babies/baby/sleep_timeline_history"); got != date+"||night" {
+		t.Fatalf("selected=%q", got)
+	}
+	for _, invalid := range []string{"", "2026-9-18", "2026-02-30", time.Now().UTC().Add(24 * time.Hour).Format("2006-01-02")} {
+		client = NewMockMQTTClient()
+		if err := NewPublisher(client, "nanit").PublishSleepTimelineForDate("baby", invalid, history); err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := client.GetPublished("nanit/babies/baby/sleep_timeline_history/availability"); got != "offline" {
+			t.Fatalf("date=%q availability=%q", invalid, got)
+		}
+	}
+}
+
+func TestPublishSleepTimelineForDateMissingAndPruned(t *testing.T) {
+	for _, history := range []*historyFile{nil, {HistoryStatus: "ok", Reports: []historyReport{{Key: "2020-01-01||night"}}}} {
+		client := NewMockMQTTClient()
+		if err := NewPublisher(client, "nanit").PublishSleepTimelineForDate("baby", "2024-01-01", history); err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := client.GetPublished("nanit/babies/baby/sleep_timeline_history/availability"); got != "offline" {
+			t.Fatalf("availability=%q", got)
+		}
+	}
+}
+
+func TestPublishSleepTimelineForDateCorrectionAndBabyIsolation(t *testing.T) {
+	client := NewMockMQTTClient()
+	history := &historyFile{HistoryStatus: "ok", Reports: []historyReport{{Key: "2024-01-01||night", Revision: 1}, {Key: "2024-01-01||night", Revision: 2}}}
+	p := NewPublisher(client, "nanit")
+	if err := p.PublishSleepTimelineForDate("a", "2024-01-01", history); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.PublishSleepTimelineForDate("b", "2024-01-01", &historyFile{HistoryStatus: "ok", Reports: []historyReport{{Key: "2024-01-01||nap"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := client.GetPublished("nanit/babies/a/sleep_timeline_history"); got != "2024-01-01||night" {
+		t.Fatalf("a=%q", got)
+	}
+	if got, _ := client.GetPublished("nanit/babies/b/sleep_timeline_history"); got != "2024-01-01||nap" {
+		t.Fatalf("b=%q", got)
+	}
+}
+
+type failingTimelineClient struct{ MockMQTTClient }
+
+func (f *failingTimelineClient) Publish(topic string, qos byte, retained bool, payload interface{}) error {
+	if strings.HasSuffix(topic, "_attributes") {
+		return errors.New("publish failed")
+	}
+	return f.MockMQTTClient.Publish(topic, qos, retained, payload)
+}
+
+func TestPublishSleepTimelineForDatePropagatesFailure(t *testing.T) {
+	client := &failingTimelineClient{MockMQTTClient: *NewMockMQTTClient()}
+	history := &historyFile{HistoryStatus: "ok", Reports: []historyReport{{Key: "2024-01-01||night"}}}
+	if err := NewPublisher(client, "nanit").PublishSleepTimelineForDate("baby", "2024-01-01", history); err == nil {
+		t.Fatal("expected publish error")
+	}
+}
 
 // MockMQTTClient implements MQTTClient for testing
 type MockMQTTClient struct {

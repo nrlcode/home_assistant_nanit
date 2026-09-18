@@ -181,8 +181,8 @@ func TestDiscoveryContract(t *testing.T) {
 			}
 		}
 	}
-	if discoveryCount != 36 {
-		t.Errorf("discovery config count = %d, want 36 (35 roster + stream_url)", discoveryCount)
+	if discoveryCount != 38 {
+		t.Errorf("discovery config count = %d, want 38 (37 roster + stream_url)", discoveryCount)
 	}
 	// Spot-check roster topics and IDs.
 	for _, want := range []struct{ component, object string }{
@@ -448,6 +448,47 @@ func TestMQTTRouting(t *testing.T) {
 			t.Error("empty UID authorized")
 		}
 	})
+}
+
+type timelineTestMessage struct {
+	topic   string
+	payload []byte
+}
+
+func (m timelineTestMessage) Duplicate() bool   { return false }
+func (m timelineTestMessage) Qos() byte         { return 0 }
+func (m timelineTestMessage) Retained() bool    { return false }
+func (m timelineTestMessage) Topic() string     { return m.topic }
+func (m timelineTestMessage) MessageID() uint16 { return 0 }
+func (m timelineTestMessage) Payload() []byte   { return m.payload }
+func (m timelineTestMessage) Ack()              {}
+
+func TestSleepTimelineDateCommandRoutesAndRejectsInvalidTopics(t *testing.T) {
+	client := newFakeClient()
+	conn := NewConnection(Opts{TopicPrefix: "nanit"})
+	conn.client = client
+	conn.RegisterBaby("baby-1", "One")
+	var gotUID, gotDate string
+	conn.RegisterSleepTimelineDateHandler(func(uid, date string) { gotUID, gotDate = uid, date })
+	conn.subscribeToSleepTimelineDateCommand()
+	handler := client.subs["nanit/babies/+/sleep_timeline_history_date/set"]
+	if handler == nil {
+		t.Fatal("date command handler not subscribed")
+	}
+	handler(client, timelineTestMessage{topic: "nanit/babies/baby-1/sleep_timeline_history_date/set", payload: []byte("2024-01-02")})
+	if gotUID != "baby-1" || gotDate != "2024-01-02" {
+		t.Fatalf("got %q %q", gotUID, gotDate)
+	}
+	handler(client, timelineTestMessage{topic: "nanit/babies/baby-1/wrong/set", payload: []byte("bad")})
+	if gotDate != "2024-01-02" {
+		t.Fatal("invalid topic delegated")
+	}
+	handler(client, timelineTestMessage{topic: "nanit/babies/unknown/sleep_timeline_history_date/set", payload: []byte("bad")})
+	if gotDate != "2024-01-02" {
+		t.Fatal("unauthorized command delegated")
+	}
+	conn.RegisterSleepTimelineDateHandler(nil)
+	handler(client, timelineTestMessage{topic: "nanit/babies/baby-1/sleep_timeline_history_date/set", payload: nil})
 }
 
 func TestStreamURL(t *testing.T) {

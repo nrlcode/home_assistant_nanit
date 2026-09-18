@@ -128,12 +128,6 @@ func (p *lastSleepEventResponsePayload) UnmarshalJSON(data []byte) error {
 		p.Event = &event
 		return nil
 	}
-	// Nanit returns an empty object when no last event is available
-	// (observed live for one camera); treat it as absent, not an error.
-	if len(fields) == 0 {
-		p.Event = nil
-		return nil
-	}
 	if !hasKey || !hasTime {
 		return errors.New("last sleep event key and time are required")
 	}

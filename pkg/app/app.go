@@ -445,6 +445,7 @@ func (app *App) startNotificationPolling(ctx utils.GracefulContext) {
 	mqttAdapter := notification.NewPahoMQTTAdapter(client)
 
 	app.notificationManager = notification.NewManager(managerConfig, app.RestClient, mqttAdapter)
+	app.MQTTConnection.RegisterSleepTimelineDateHandler(app.notificationManager.SetSleepTimelineDate)
 	// Single writer for motion/sound state: funnel notification motion/sound
 	// events through the MQTT Connection's WColan-compatible publication.
 	if app.MQTTConnection != nil {

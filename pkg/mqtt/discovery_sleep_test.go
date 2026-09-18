@@ -63,3 +63,28 @@ func TestExpandedSleepDiscovery(t *testing.T) {
 		}
 	}
 }
+
+func TestHistoricalTimelineDiscovery(t *testing.T) {
+	want := map[string]string{"sleep_timeline_history": "sensor", "sleep_timeline_history_date": "select"}
+	for object, component := range want {
+		var found *entitySpec
+		for i := range entitySpecs {
+			if entitySpecs[i].object == object {
+				found = &entitySpecs[i]
+				break
+			}
+		}
+		if found == nil || found.component != component {
+			t.Fatalf("%s missing/wrong: %#v", object, found)
+		}
+		if found.topic == "" {
+			t.Errorf("%s missing state topic", object)
+		}
+		if object == "sleep_timeline_history" && found.sleepAvailability == "" {
+			t.Errorf("history missing availability")
+		}
+		if object == "sleep_timeline_history_date" && found.cmd == "" {
+			t.Errorf("selector missing command topic")
+		}
+	}
+}

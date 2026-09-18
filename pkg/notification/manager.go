@@ -23,14 +23,15 @@ type ManagerConfig struct {
 
 // Manager coordinates polling and publishing of notification events
 type Manager struct {
-	config       ManagerConfig
-	poller       *Poller
-	publisher    *Publisher
-	fetcher      MessageFetcher
-	sleepFetcher SleepFetcher
-	sleepState   map[string]*sleepBabyState
-	sleepHistory *sleepHistory
-	OnEvent      func(Event)
+	config        ManagerConfig
+	poller        *Poller
+	publisher     *Publisher
+	fetcher       MessageFetcher
+	sleepFetcher  SleepFetcher
+	sleepState    map[string]*sleepBabyState
+	sleepHistory  *sleepHistory
+	selectedDates map[string]string
+	OnEvent       func(Event)
 
 	mu          sync.Mutex
 	babyBackoff map[string]time.Duration
@@ -51,16 +52,36 @@ func NewManager(config ManagerConfig, fetcher MessageFetcher, mqttClient MQTTCli
 		config.SleepStatsStaleAfter = defaultSleepStatsStale
 	}
 	manager := &Manager{
-		config:       config,
-		poller:       NewPoller(config.PollerConfig, fetcher),
-		publisher:    NewPublisher(mqttClient, config.TopicPrefix),
-		fetcher:      fetcher,
-		babyBackoff:  make(map[string]time.Duration),
-		sleepState:   make(map[string]*sleepBabyState),
-		sleepHistory: newSleepHistory(config.HistoryDir),
+		config:        config,
+		poller:        NewPoller(config.PollerConfig, fetcher),
+		publisher:     NewPublisher(mqttClient, config.TopicPrefix),
+		fetcher:       fetcher,
+		babyBackoff:   make(map[string]time.Duration),
+		sleepState:    make(map[string]*sleepBabyState),
+		sleepHistory:  newSleepHistory(config.HistoryDir),
+		selectedDates: make(map[string]string),
 	}
 	manager.sleepFetcher, _ = fetcher.(SleepFetcher)
 	return manager
+}
+
+func (m *Manager) SetSleepTimelineDate(babyUID, date string) {
+	if len(date) != len("2006-01-02") {
+		_ = m.publisher.PublishSleepTimelineForDate(babyUID, date, nil)
+		return
+	}
+	if _, err := time.Parse("2006-01-02", date); err != nil {
+		_ = m.publisher.PublishSleepTimelineForDate(babyUID, date, nil)
+		return
+	}
+	m.mu.Lock()
+	m.selectedDates[babyUID] = date
+	m.mu.Unlock()
+	if history, err := m.sleepHistory.load(m.historyScopeForBaby(babyUID), time.Now().UTC()); err == nil {
+		_ = m.publisher.PublishSleepTimelineForDate(babyUID, date, history)
+	} else {
+		_ = m.publisher.PublishSleepTimelineForDate(babyUID, date, nil)
+	}
 }
 
 // Run starts the notification polling loop for all babies

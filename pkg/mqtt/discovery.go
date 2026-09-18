@@ -93,6 +93,8 @@ var entitySpecs = []entitySpec{
 	{component: "sensor", object: "last_wake_up", friendly: "Last wake up", topic: "last_wake_up", class: "timestamp", sleepAvailability: "last_wake_up", attributes: "sleep_stats_attributes"},
 	{component: "sensor", object: "sleep_report_status", friendly: "Sleep report status", topic: "sleep_report_status", icon: "mdi:file-chart", sleepAvailability: "sleep_report_status", attributes: "sleep_stats_attributes"},
 	{component: "sensor", object: "sleep_timeline", friendly: "Sleep timeline", topic: "sleep_timeline", icon: "mdi:timeline-clock", sleepAvailability: "sleep_timeline", attributes: "sleep_timeline_attributes"},
+	{component: "sensor", object: "sleep_timeline_history", friendly: "Sleep timeline history", topic: "sleep_timeline_history", icon: "mdi:timeline-clock-outline", sleepAvailability: "sleep_timeline_history", attributes: "sleep_timeline_history_attributes"},
+	{component: "select", object: "sleep_timeline_history_date", friendly: "Sleep timeline history date (UTC)", topic: "sleep_timeline_history_date", cmd: "sleep_timeline_history_date/set", icon: "mdi:calendar"},
 	{component: "sensor", object: "last_fell_asleep", friendly: "Last fell asleep", topic: "last_fell_asleep", class: "timestamp", sleepAvailability: "last_fell_asleep", attributes: "sleep_event_attributes"},
 	{component: "sensor", object: "last_parent_visit", friendly: "Last parent visit", topic: "last_parent_visit", class: "timestamp", sleepAvailability: "last_parent_visit", attributes: "sleep_event_attributes"},
 	{component: "sensor", object: "last_sleep_event", friendly: "Last sleep event", topic: "last_sleep_event", icon: "mdi:calendar-clock", sleepAvailability: "last_sleep_event", attributes: "sleep_event_attributes"},
@@ -203,8 +205,10 @@ func (conn *Connection) publishDiscovery(babyUID, babyName string) int {
 			e.PayloadOn = "true"
 			e.PayloadOff = "false"
 		}
-		if s.component == "switch" {
+		if s.component == "switch" || s.component == "select" {
 			e.CommandTopic = fmt.Sprintf("%v/%v", base, s.cmd)
+		}
+		if s.component == "switch" {
 			e.StateOn = "true"
 			e.StateOff = "false"
 		}

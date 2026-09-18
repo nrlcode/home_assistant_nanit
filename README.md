@@ -84,6 +84,9 @@ invalidates the refresh token.
 
 ## Sleep reports and timeline
 
+The date selector `sleep_timeline_history_date` accepts a validated UTC `YYYY-MM-DD` command on `nanit/babies/<baby>/sleep_timeline_history_date/set` and publishes the matching retained historical snapshot. Missing, future, invalid, or pruned dates publish unavailable state without changing the latest timeline.
+
+
 MQTT discovery publishes latest-report metrics separately from the fresh live
 `is_asleep` and `in_bed` sensors. Completed reports remain historical snapshots
 and never imply current state. Sleep-event notifications are best-effort,

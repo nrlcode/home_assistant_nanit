@@ -20,7 +20,7 @@ const (
 	sleepHistoryMaxEvents    = 2000
 	sleepHistoryMaxIntervals = 256
 	sleepHistoryMaxDedupe    = 256
-	sleepHistoryMaxTotal     = 16 << 20
+	sleepHistoryMaxTotal     = 64 << 20
 )
 
 type historyInterval struct {
@@ -64,6 +64,33 @@ type historyFile struct {
 type sleepHistory struct {
 	dir   string
 	files map[string]*historyFile
+}
+
+// reportForDate returns only the sanitized report for an explicit UTC date.
+func (h *sleepHistory) reportForDate(scope, date string) (*historyReport, string) {
+	f := h.files[scope]
+	return reportForDate(f, date)
+}
+
+func reportForDate(f *historyFile, date string) (*historyReport, string) {
+	if len(date) != len("2006-01-02") {
+		return nil, "unavailable"
+	}
+	parsed, err := time.Parse("2006-01-02", date)
+	if err != nil || parsed.After(time.Now().UTC().Truncate(24*time.Hour)) {
+		return nil, "unavailable"
+	}
+	if f == nil {
+		return nil, "unavailable"
+	}
+	prefix := date + "|"
+	for i := range f.Reports {
+		if len(f.Reports[i].Key) >= len(prefix) && f.Reports[i].Key[:len(prefix)] == prefix {
+			r := f.Reports[i]
+			return &r, "ok"
+		}
+	}
+	return nil, "unavailable"
 }
 
 func newSleepHistory(dir string) *sleepHistory {

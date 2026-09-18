@@ -19,7 +19,7 @@ RUN case "${BUILD_ARCH}" in \
 # --- runtime ------------------------------------------------------------------
 FROM ghcr.io/hassio-addons/base:18.2.1@sha256:149a3937e1d6daef610faceebd6eb6632b821c566a2c5084bb8f8c1e552899a5
 ARG BUILD_ARCH
-LABEL io.hass.version="1.0.0" \
+LABEL io.hass.version="1.1.3" \
       io.hass.type="app" \
       io.hass.arch="${BUILD_ARCH}" \
       org.opencontainers.image.title="Nanit Bridge" \

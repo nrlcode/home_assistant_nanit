@@ -88,7 +88,7 @@ func TestLastSleepEventContract(t *testing.T) {
 		{name: "wrapped compatibility", body: `{"event":{"time":1700000000.25,"key":"WOKE_UP"}}`, wantKey: "WOKE_UP"},
 		{name: "top level null", body: `null`, wantNil: true},
 		{name: "wrapped null", body: `{"event":null}`, wantNil: true},
-		{name: "empty object (no last event available)", body: `{}`, wantNil: true},
+		{name: "empty object", body: `{}`, wantErr: true},
 		{name: "ambiguous", body: `{"time":1700000000,"key":"REMOVED","event":{"time":1700000001,"key":"WOKE_UP"}}`, wantErr: true},
 		{name: "missing time", body: `{"key":"REMOVED"}`, wantErr: true},
 		{name: "array", body: `[]`, wantErr: true},

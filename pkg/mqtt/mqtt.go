@@ -18,6 +18,7 @@ var ErrBabyNotAuthorized = errors.New("baby UID not authorized")
 
 type SendLightCommandHandler func(nightLightState bool)
 type SendStandbyCommandHandler func(standbyState bool)
+type SleepTimelineDateHandler func(babyUID, date string)
 
 // eventActiveWindow - how long a motion/sound "_active" binary_sensor stays on
 // after an event (Nanit only gives us the event timestamp, not a duration).
@@ -46,6 +47,7 @@ type Connection struct {
 
 	sendLightCommandHandler   SendLightCommandHandler
 	sendStandbyCommandHandler SendStandbyCommandHandler
+	sleepTimelineDateHandler  SleepTimelineDateHandler
 
 	mu        sync.Mutex
 	timers    map[string]*activeTimer // "uid/key" -> timer
@@ -241,6 +243,7 @@ func (conn *Connection) handleSuccessfulConnect(client MQTT.Client) {
 		return
 	}
 	conn.subscribeToStandbyCommand()
+	conn.subscribeToSleepTimelineDateCommand()
 }
 
 // handleConnectionLost invalidates pending active-off timers so stale
@@ -388,6 +391,32 @@ func (conn *Connection) subscribeToStandbyCommand() {
 
 	if token := conn.GetClient().Subscribe(commandTopic, 0, standbyMessageHandler); token.Wait() && token.Error() != nil {
 		log.Error().Err(token.Error()).Str("topic", commandTopic).Msg("Failed to subscribe to command topic")
+	}
+}
+
+func (conn *Connection) RegisterSleepTimelineDateHandler(handler SleepTimelineDateHandler) {
+	conn.sleepTimelineDateHandler = handler
+}
+
+func (conn *Connection) subscribeToSleepTimelineDateCommand() {
+	commandTopic := fmt.Sprintf("%v/babies/+/sleep_timeline_history_date/set", conn.Opts.TopicPrefix)
+	handler := func(_ MQTT.Client, msg MQTT.Message) {
+		parts := strings.Split(strings.Trim(msg.Topic(), "/"), "/")
+		prefix := strings.Split(strings.Trim(conn.Opts.TopicPrefix, "/"), "/")
+		if len(parts) != len(prefix)+4 || parts[len(prefix)] != "babies" || parts[len(prefix)+2] != "sleep_timeline_history_date" || parts[len(prefix)+3] != "set" {
+			return
+		}
+		babyUID := parts[len(prefix)+1]
+		if err := conn.ValidateBabyCommandAuth(babyUID); err != nil {
+			log.Error().Err(err).Str("baby_uid", babyUID).Msg("Unauthorized sleep timeline command rejected")
+			return
+		}
+		if conn.sleepTimelineDateHandler != nil {
+			conn.sleepTimelineDateHandler(babyUID, string(msg.Payload()))
+		}
+	}
+	if token := conn.GetClient().Subscribe(commandTopic, 0, handler); token.Wait() && token.Error() != nil {
+		log.Error().Err(token.Error()).Str("topic", commandTopic).Msg("Failed to subscribe to sleep timeline date command")
 	}
 }
 

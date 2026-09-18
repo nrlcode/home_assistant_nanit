@@ -55,6 +55,15 @@ func (m *Manager) pollSleepDue(ctx context.Context, babyUID string, now time.Tim
 	m.publishSleepState(babyUID, now, state)
 }
 
+func (m *Manager) publishSelectedSleepTimeline(babyUID string, history *historyFile) {
+	m.mu.Lock()
+	date := m.selectedDates[babyUID]
+	m.mu.Unlock()
+	if date != "" {
+		_ = m.publisher.PublishSleepTimelineForDate(babyUID, date, history)
+	}
+}
+
 func (m *Manager) pollSleepStats(ctx context.Context, babyUID string, now time.Time, state *sleepBabyState) {
 	response, err := m.sleepFetcher.TryFetchSleepStatsCtx(ctx, babyUID)
 	if err != nil {
@@ -74,6 +83,7 @@ func (m *Manager) pollSleepStats(ctx context.Context, babyUID string, now time.T
 		log.Warn().Err(err).Msg("sleep history report update failed")
 	} else {
 		_ = m.publisher.PublishSleepTimeline(babyUID, history)
+		m.publishSelectedSleepTimeline(babyUID, history)
 	}
 }
 
@@ -166,6 +176,7 @@ func (m *Manager) pollSleepEvents(ctx context.Context, babyUID string, now time.
 		log.Warn().Err(err).Msg("sleep history event update failed")
 	} else {
 		_ = m.publisher.PublishSleepTimeline(babyUID, history)
+		m.publishSelectedSleepTimeline(babyUID, history)
 	}
 	if err := m.publisher.PublishLastSleepTimestamps(babyUID, state.lastFellAsleep, state.lastWokeUp, state.lastParentVisit); err != nil {
 		log.Warn().Err(err).Msg("sleep timestamp publish failed")
